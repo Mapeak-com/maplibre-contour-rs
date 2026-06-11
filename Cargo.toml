@@ -20,7 +20,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [dependencies]
 # PNG decoding of the raster-DEM tile. We only need PNG, so trim defaults.
 # Pinned exact: image >= 0.25.6 raises its MSRV past what we target here.
-image = { version = "=0.25.5", default-features = false, features = ["png"] }
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
 # Marching-squares isolines/contours (d3-contour port). Emits geo-types.
 contour = "0.13"
 # Geometry primitives shared across the pipeline.
@@ -34,11 +34,11 @@ geozero = { version = "0.15", default-features = false, features = [
 # Error types.
 thiserror = "2"
 # LRU cache for decoded parent DEM tiles (mirrors maplibre-contour's cache).
-lru = "0.12"
+lru = "0.18"
 
 # Optional: uniffi for Kotlin/Swift bindings. Enable with `--features ffi`.
 [dependencies.uniffi]
-version = "0.28"
+version = "0.31"
 optional = true
 
 [features]
