@@ -42,9 +42,7 @@ jobs:
       - name: Open pull request
         uses: peter-evans/create-pull-request@v7
         with:
-          # A PAT here (optional) lets CI run on the bump PR; otherwise the PR
-          # still merges fine and the Release workflow runs on merge to main.
-          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           branch: release/v${{ steps.ver.outputs.new }}
           title: "chore: release v${{ steps.ver.outputs.new }}"
           commit-message: "chore: bump version to ${{ steps.ver.outputs.new }}"
