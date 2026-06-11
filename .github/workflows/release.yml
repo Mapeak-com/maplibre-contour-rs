@@ -1,0 +1,115 @@
+name: Release
+
+# Tag a release to publish prebuilt mobile artifacts to a GitHub Release, so
+# apps can consume the library without anything being published to crates.io /
+# Maven / CocoaPods. Rust consumers use a git dependency (see README).
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Add Android targets
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r26d
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build .so per ABI
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
+            -o artifacts/android/jniLibs build --release --features ffi
+
+      - name: Generate Kotlin bindings
+        run: |
+          cargo build --release --features ffi
+          cargo run --features uniffi-cli --bin uniffi-bindgen -- generate \
+            --library target/release/libmaplibre_contour_rs.so \
+            --language kotlin --out-dir artifacts/android/kotlin
+
+      - name: Package
+        run: |
+          cd artifacts/android
+          zip -r ../../maplibre-contour-rs-android.zip jniLibs kotlin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: maplibre-contour-rs-android.zip
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Add iOS targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
+      - name: Build static libs
+        run: |
+          for t in aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios; do
+            cargo build --release --features ffi --target "$t"
+          done
+
+      - name: Generate Swift bindings
+        run: |
+          cargo build --release --features ffi
+          cargo run --features uniffi-cli --bin uniffi-bindgen -- generate \
+            --library target/release/libmaplibre_contour_rs.dylib \
+            --language swift --out-dir bindings/swift
+
+      - name: Assemble xcframework
+        run: |
+          mkdir -p target/ios-sim headers
+          lipo -create \
+            target/aarch64-apple-ios-sim/release/libmaplibre_contour_rs.a \
+            target/x86_64-apple-ios/release/libmaplibre_contour_rs.a \
+            -output target/ios-sim/libmaplibre_contour_rs.a
+          # xcframework headers need a `module.modulemap` next to the C header.
+          cp bindings/swift/maplibre_contour_rsFFI.h headers/
+          cp bindings/swift/maplibre_contour_rsFFI.modulemap headers/module.modulemap
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libmaplibre_contour_rs.a -headers headers \
+            -library target/ios-sim/libmaplibre_contour_rs.a -headers headers \
+            -output ContourTiler.xcframework
+          zip -r maplibre-contour-rs-ios.zip ContourTiler.xcframework bindings/swift/maplibre_contour_rs.swift
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: maplibre-contour-rs-ios.zip
+
+  release:
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*.zip

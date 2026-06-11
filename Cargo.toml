@@ -1,0 +1,67 @@
+[package]
+name = "maplibre-contour-rs"
+version = "0.1.0"
+edition = "2021"
+# Bumped from the scaffold's 1.75: the pinned `image`/`geozero` stack needs a
+# newer compiler than that. CI builds on stable.
+rust-version = "1.82"
+license = "MIT OR Apache-2.0"
+description = "Generate contour-line vector tiles (MVT) from raster-DEM tiles. A Rust port of maplibre-contour, intended to be embedded on Android/iOS."
+repository = "https://github.com/mapeak-com/maplibre-contour-rs"
+readme = "README.md"
+keywords = ["mvt", "contour", "dem", "maplibre", "vector-tiles"]
+categories = ["science::geo"]
+
+# `cdylib` for the Android `.so`, `staticlib` for the iOS `.a`/xcframework,
+# `lib` so the crate is still usable as a normal Rust dependency and in tests.
+[lib]
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+# PNG decoding of the raster-DEM tile. We only need PNG, so trim defaults.
+# Pinned exact: image >= 0.25.6 raises its MSRV past what we target here.
+image = { version = "=0.25.5", default-features = false, features = ["png"] }
+# Marching-squares isolines/contours (d3-contour port). Emits geo-types.
+contour = "0.13"
+# Geometry primitives shared across the pipeline.
+geo-types = "0.7"
+# geo-types -> MVT encoding bridge (and GeoJSON for debugging).
+geozero = { version = "0.15", default-features = false, features = [
+    "with-mvt",
+    "with-geo",
+    "with-geojson",
+] }
+# Error types.
+thiserror = "2"
+# LRU cache for decoded parent DEM tiles (mirrors maplibre-contour's cache).
+lru = "0.12"
+
+# Optional: uniffi for Kotlin/Swift bindings. Enable with `--features ffi`.
+[dependencies.uniffi]
+version = "0.28"
+optional = true
+
+[features]
+default = []
+# Compiles the uniffi scaffolding for Kotlin + Swift bindings.
+ffi = ["dep:uniffi"]
+# Adds the bindgen CLI bits so `uniffi-bindgen` can emit Kotlin/Swift sources.
+# Kept separate so the shipped mobile library doesn't pull clap & friends.
+uniffi-cli = ["ffi", "uniffi/cli"]
+
+# Generates the Kotlin/Swift sources from the compiled library. Only built
+# when the CLI feature is on, so a plain `--features ffi` build stays lean.
+[[bin]]
+name = "uniffi-bindgen"
+required-features = ["uniffi-cli"]
+
+[dev-dependencies]
+# Add criterion here when you start benchmarking the hot path.
+
+# Alternative MVT encoder if you outgrow geozero's writer:
+# mvt = "0.10"
+
+[profile.release]
+# Mobile binaries care about size; tune as needed.
+opt-level = 3
+lto = "thin"
