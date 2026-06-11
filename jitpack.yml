@@ -1,0 +1,11 @@
+# JitPack builds the :android module from a release tag into an AAR, pulling the
+# prebuilt native libs from the matching GitHub Release.
+#
+# We bootstrap a pinned Gradle wrapper from JitPack's system Gradle (so no
+# binary gradle-wrapper.jar needs to live in the repo); the wrapper then runs
+# the actual build with the version AGP 8.5 expects.
+jdk:
+  - openjdk17
+install:
+  - gradle wrapper --gradle-version 8.7
+  - ./gradlew :android:publishToMavenLocal

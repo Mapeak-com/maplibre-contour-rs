@@ -1,0 +1,55 @@
+name: Bump version
+
+# Manually pick a semver level; this opens a PR that bumps Cargo.toml (and
+# Cargo.lock) via `cargo set-version`. Merging that PR makes the Release
+# workflow tag the commit and publish — see release.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver level to bump
+        type: choice
+        required: true
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-edit
+
+      - name: Bump version
+        id: ver
+        run: |
+          current=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
+          cargo set-version --bump ${{ inputs.bump }}
+          new=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          # A PAT here (optional) lets CI run on the bump PR; otherwise the PR
+          # still merges fine and the Release workflow runs on merge to main.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          branch: release/v${{ steps.ver.outputs.new }}
+          title: "chore: release v${{ steps.ver.outputs.new }}"
+          commit-message: "chore: bump version to ${{ steps.ver.outputs.new }}"
+          body: |
+            Bumps the version `${{ steps.ver.outputs.current }}` → `${{ steps.ver.outputs.new }}` (${{ inputs.bump }}).
+
+            Merging this PR tags `v${{ steps.ver.outputs.new }}` and publishes the
+            release (mobile artifacts) via `release.yml`.

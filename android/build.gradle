@@ -1,0 +1,78 @@
+// Android library that JitPack builds from a release tag. It carries no native
+// code of its own: the prebuilt jniLibs and generated Kotlin bindings are
+// downloaded from the matching GitHub Release (built by .github/workflows/
+// release.yml), so this stays in sync with the Rust version automatically.
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+    id 'maven-publish'
+}
+
+// Single source of truth for the version: the Rust crate.
+def cargoVersion = (rootProject.file('Cargo.toml').text =~ /(?m)^version = "([^"]+)"/)[0][1]
+
+group = 'com.github.mapeak-com'
+version = cargoVersion
+
+def nativeDir = layout.buildDirectory.dir('native')
+
+tasks.register('fetchNative') {
+    description = 'Download prebuilt jniLibs + Kotlin bindings from the GitHub Release'
+    def out = nativeDir.get().asFile
+    outputs.dir(out)
+    doLast {
+        def url = "https://github.com/mapeak-com/maplibre-contour-rs/releases/download/v${version}/maplibre-contour-rs-android.zip"
+        def zip = new File(temporaryDir, 'android.zip')
+        zip.withOutputStream { os -> new URL(url).withInputStream { is -> os << is } }
+        delete(out)
+        copy {
+            from zipTree(zip)
+            into out
+        }
+    }
+}
+
+android {
+    namespace 'com.mapeak.maplibrecontour'
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 21
+    }
+
+    sourceSets {
+        main {
+            // Populated by `fetchNative` before the build runs.
+            jniLibs.srcDirs += "${nativeDir.get().asFile}/jniLibs"
+            java.srcDirs += "${nativeDir.get().asFile}/kotlin"
+        }
+    }
+
+    publishing {
+        singleVariant('release') {
+            withSourcesJar()
+        }
+    }
+}
+
+tasks.matching { it.name == 'preBuild' }.configureEach {
+    dependsOn 'fetchNative'
+}
+
+dependencies {
+    // uniffi's Kotlin bindings load the native library through JNA.
+    implementation 'net.java.dev.jna:jna:5.14.0@aar'
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = 'com.github.mapeak-com'
+                artifactId = 'maplibre-contour-rs'
+                version = project.version
+            }
+        }
+    }
+}

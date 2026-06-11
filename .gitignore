@@ -13,6 +13,15 @@ target
 # Contains mutation testing data
 **/mutants.out*/
 
+# Gradle / Android (JitPack build)
+.gradle/
+build/
+local.properties
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

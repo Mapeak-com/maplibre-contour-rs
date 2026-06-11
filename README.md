@@ -78,24 +78,59 @@ maplibre-contour-rs = { git = "https://github.com/mapeak-com/maplibre-contour-rs
 
 ## Mobile (Android & iOS)
 
-The crate has no native C dependencies, so it cross-compiles cleanly. With the
-`ffi` feature it exposes a [uniffi](https://mozilla.github.io/uniffi-rs/)
-interface for Kotlin and Swift (see the `ffi` module docs for usage).
+The crate exposes a [uniffi](https://mozilla.github.io/uniffi-rs/) interface
+behind the `ffi` feature (see the `ffi` module docs for the Kotlin/Swift API).
+Each release publishes consumable packages — no Maven/CocoaPods/crates.io
+needed.
 
-**Prebuilt artifacts** — Android (`jniLibs` + Kotlin) and iOS (`.xcframework` +
-Swift) bundles are attached to every [GitHub Release](../../releases), built by
-[`.github/workflows/release.yml`](.github/workflows/release.yml). Tag a commit
-(`git tag v0.1.0 && git push --tags`) to produce them; consuming apps just
-download the bundle for their platform.
+### iOS — Swift Package Manager
+
+In Xcode: **File → Add Packages →** `https://github.com/mapeak-com/maplibre-contour-rs`,
+pinned to a version `>=` the first release. [`Package.swift`](Package.swift)
+vends the compiled `.xcframework` as a binary target (downloaded from the
+release) plus the generated Swift wrapper.
+
+```swift
+import MaplibreContour
+let tiler = ContourTiler(fetcher: myFetcher, config: defaultConfig())
+```
+
+### Android — JitPack
+
+Add JitPack and the dependency (`v<tag>` or a commit):
+
+```groovy
+repositories { maven { url 'https://jitpack.io' } }
+dependencies {
+    implementation 'com.github.mapeak-com.maplibre-contour-rs:android:v0.1.0'
+}
+```
+
+JitPack builds [`android/`](android/build.gradle) from the tag, pulling the
+prebuilt `jniLibs` + Kotlin bindings from that release. (JNA comes transitively.)
+
+### How releases are produced
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds the
+Android (`jniLibs` + Kotlin) and iOS (`.xcframework`) artifacts, attaches them to
+the [GitHub Release](../../releases), and stamps `Package.swift` with that
+release's URL + checksum on the tag. It runs automatically when the version in
+`Cargo.toml` changes on `main` — use the **Bump version** workflow to open that
+PR. Run the Release workflow manually (its `workflow_dispatch` button) to cut
+the first release, or to retry a version whose tag doesn't exist yet.
+
+> First-release notes: the Android `:android` build relies on the Gradle wrapper
+> that `jitpack.yml` bootstraps; verify the first build at `jitpack.io`. iOS
+> resolves only from a real version tag (not `main`, which holds placeholder
+> `url`/`checksum`).
 
 To generate bindings locally instead:
 
 ```bash
-rustup target add aarch64-apple-ios aarch64-linux-android  # etc.
 cargo build --release --features ffi
 cargo run --features uniffi-cli --bin uniffi-bindgen -- generate \
     --library target/release/libmaplibre_contour_rs.dylib \
-    --language kotlin --out-dir bindings
+    --language swift --out-dir bindings
 ```
 
 ## License

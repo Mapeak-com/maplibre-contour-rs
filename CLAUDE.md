@@ -64,8 +64,16 @@ in that module's rustdoc. Key points:
   Kotlin/Swift sources from the compiled library; the CLI deps are gated so a
   plain `--features ffi` mobile build stays lean.
 - Prebuilt Android/iOS artifacts are produced by `.github/workflows/release.yml`
-  on a `v*` tag and attached to the GitHub Release; that workflow is also the
-  source of truth for the `cargo-ndk` / `xcframework` build steps.
+  on a `v*` tag (or a version bump merged to `main`) and attached to the GitHub
+  Release; that workflow is also the source of truth for the build steps.
+- Distribution packaging (no registries):
+  - **iOS / SwiftPM** — `Package.swift` (xcframework as a remote `binaryTarget`)
+    + the committed `Sources/MaplibreContour/maplibre_contour_rs.swift` wrapper.
+    The release job stamps the per-release `url`/`checksum` onto the tag.
+  - **Android / JitPack** — the `:android` Gradle library (`android/build.gradle`,
+    `settings.gradle`, `build.gradle`, `jitpack.yml`) downloads the release's
+    `jniLibs` + Kotlin bindings and packages an AAR. No `.so`/wrapper is built in
+    JitPack; the Gradle wrapper is bootstrapped by `jitpack.yml`.
 - Keep the core crate free of native C deps (no GDAL/GEOS `geozero` features),
   otherwise cross-compilation gets painful.
 
