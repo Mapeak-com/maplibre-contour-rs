@@ -20,7 +20,7 @@ jobs:
   android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: Swatinem/rust-cache@v2
 
       - name: Add Android targets
@@ -53,7 +53,7 @@ jobs:
           cd artifacts/android
           zip -r ../../maplibre-contour-rs-android.zip jniLibs kotlin
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           path: maplibre-contour-rs-android.zip
@@ -61,7 +61,7 @@ jobs:
   ios:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: Swatinem/rust-cache@v2
 
       - name: Add iOS targets
@@ -96,7 +96,7 @@ jobs:
             -output ContourTiler.xcframework
           zip -r maplibre-contour-rs-ios.zip ContourTiler.xcframework bindings/swift/maplibre_contour_rs.swift
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ios
           path: maplibre-contour-rs-ios.zip
@@ -105,11 +105,11 @@ jobs:
     needs: [android, ios]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: dist/*.zip
