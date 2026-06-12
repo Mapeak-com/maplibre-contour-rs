@@ -76,7 +76,7 @@ tasks.matching { it.name.startsWith("source") && it.name.endsWith("Jar") }
     .configureEach { dependsOn(uniffiBindgen) }
 
 dependencies {
-    implementation("net.java.dev.jna:jna:5.14.0@aar")
+    implementation("net.java.dev.jna:jna:5.19.0@aar")
 }
 
 // The JNA dependency must resolve as the Android `aar` (it ships
