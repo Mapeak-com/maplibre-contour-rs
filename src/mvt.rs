@@ -1,8 +1,8 @@
-//! Transform contour geometry into tile/extent space and serialize to MVT.
+//! Serialize traced contours into a Mapbox Vector Tile.
 //!
-//! Lines arrive in buffered-grid pixel coordinates; here we drop the buffer
-//! margin, scale into `0..extent`, and write one layer with a feature per
-//! contour carrying `ele` and `level` attributes. geozero's [`ToMvt`] does the
+//! Contours arrive in `0..extent` tile coordinates (see [`crate::contour`]), so
+//! this just builds one line feature per contour — carrying `ele` and `level`
+//! attributes — and writes a single layer. geozero's [`ToMvt`] does the
 //! command-stream encoding; we assemble the layer and key/value tables.
 
 use geo_types::{Coord, Geometry, LineString, MultiLineString};
@@ -10,38 +10,40 @@ use geozero::mvt::{tile, Message, Tile};
 use geozero::ToMvt;
 
 use crate::config::ContourConfig;
-use crate::contour::ContourLine;
+use crate::contour::Contour;
 use crate::error::{Error, Result};
 
-/// Encode `lines` into MVT bytes for one tile.
-pub fn encode_mvt(lines: &[ContourLine], config: &ContourConfig) -> Result<Vec<u8>> {
-    let buffer = config.buffer_px as f64;
-    let scale = config.extent as f64 / config.tile_size as f64;
-    let to_tile = |c: Coord<f64>| Coord {
-        x: (c.x - buffer) * scale,
-        y: (c.y - buffer) * scale,
-    };
-
+/// Encode `contours` into MVT bytes for one tile.
+pub fn encode_mvt(contours: &[Contour], config: &ContourConfig) -> Result<Vec<u8>> {
     let keys = vec![config.elevation_key.clone(), config.level_key.clone()];
     let mut values: Vec<tile::Value> = Vec::new();
-    let mut features: Vec<tile::Feature> = Vec::with_capacity(lines.len());
+    let mut features: Vec<tile::Feature> = Vec::with_capacity(contours.len());
 
-    for (i, line) in lines.iter().enumerate() {
+    for (i, contour) in contours.iter().enumerate() {
         let geometry = MultiLineString(
-            line.geometry
-                .0
+            contour
+                .lines
                 .iter()
-                .map(|ls| LineString(ls.0.iter().map(|&c| to_tile(c)).collect()))
+                .map(|flat| {
+                    LineString(
+                        flat.chunks_exact(2)
+                            .map(|p| Coord { x: p[0], y: p[1] })
+                            .collect(),
+                    )
+                })
                 .collect(),
         );
+        if geometry.0.iter().all(|ls| ls.0.len() < 2) {
+            continue;
+        }
 
         let mut feature = Geometry::MultiLineString(geometry)
             .to_mvt_unscaled()
             .map_err(|e| Error::Mvt(e.to_string()))?;
         feature.id = Some(i as u64 + 1);
 
-        let ele_idx = intern(&mut values, dbl(line.elevation as f64));
-        let level_idx = intern(&mut values, int(line.level as i64));
+        let ele_idx = intern(&mut values, dbl(contour.elevation as f64));
+        let level_idx = intern(&mut values, int(contour.level as i64));
         feature.tags = vec![0, ele_idx, 1, level_idx]; // [key, value] pairs
 
         features.push(feature);
@@ -92,13 +94,11 @@ mod tests {
     use super::*;
     use geozero::mvt::tile::GeomType;
 
-    fn line_at(elevation: f32, level: u32, pts: &[(f64, f64)]) -> ContourLine {
-        ContourLine {
+    fn contour(elevation: f32, level: u32, lines: Vec<Vec<f64>>) -> Contour {
+        Contour {
             elevation,
             level,
-            geometry: MultiLineString(vec![LineString(
-                pts.iter().map(|&(x, y)| Coord { x, y }).collect(),
-            )]),
+            lines,
         }
     }
 
@@ -110,12 +110,12 @@ mod tests {
             buffer_px: 1,
             ..Default::default()
         };
-        let lines = vec![
-            line_at(100.0, 1, &[(1.0, 1.0), (257.0, 1.0)]),
-            line_at(50.0, 0, &[(1.0, 1.0), (1.0, 257.0)]),
+        let contours = vec![
+            contour(100.0, 1, vec![vec![0.0, 0.0, 4096.0, 0.0]]),
+            contour(50.0, 0, vec![vec![0.0, 0.0, 0.0, 4096.0]]),
         ];
 
-        let bytes = encode_mvt(&lines, &config).unwrap();
+        let bytes = encode_mvt(&contours, &config).unwrap();
         let decoded = Tile::decode(&bytes[..]).unwrap();
         assert_eq!(decoded.layers.len(), 1);
         let layer = &decoded.layers[0];

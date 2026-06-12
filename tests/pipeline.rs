@@ -50,7 +50,6 @@ fn config() -> ContourConfig {
         tile_size: TILE,
         extent: 4096,
         buffer_px: 1,
-        smooth: false,
         thresholds: vec![ThresholdRule {
             zoom: 0,
             intervals: vec![50.0, 250.0],
@@ -154,7 +153,6 @@ fn overzooms_above_dem_max_zoom() {
         tile_size: TILE,
         extent: 4096,
         buffer_px: 1,
-        smooth: false,
         dem_max_zoom: dem_z,
         overzoom: 0,
         thresholds: vec![ThresholdRule {

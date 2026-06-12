@@ -42,34 +42,23 @@ pub struct ThresholdRule {
 }
 
 impl ThresholdRule {
-    /// Threshold elevations to trace across `[min, max]`, each tagged with its
-    /// level. Empty if the rule has no positive minor interval.
-    pub fn levels(&self, min: f32, max: f32) -> Vec<(f32, u32)> {
-        let mut out = Vec::new();
-        let interval = self.intervals.first().copied().unwrap_or(0.0);
-        if interval <= 0.0
-            || !interval.is_finite()
-            || !min.is_finite()
-            || !max.is_finite()
-            || max < min
-        {
-            return out;
-        }
+    /// The minor contour interval (`intervals[0]`); lines are traced at every
+    /// multiple of it. 0 if the rule is empty.
+    pub fn interval(&self) -> f32 {
+        self.intervals.first().copied().unwrap_or(0.0)
+    }
 
-        let iv = interval as f64;
-        let first = (min as f64 / iv).ceil() as i64;
-        let last = (max as f64 / iv).floor() as i64;
-        for m in first..=last {
-            let elevation = (m as f64 * iv) as f32;
-            let mut level = 0;
-            for (i, &spacing) in self.intervals.iter().enumerate() {
-                if spacing > 0.0 && is_multiple(elevation, spacing) {
-                    level = level.max(i as u32);
-                }
+    /// The level for a contour at `elevation`: the largest index `i` for which
+    /// `elevation` is a multiple of `intervals[i]` (matching maplibre-contour's
+    /// `max(levels.map((l, i) => ele % l === 0 ? i : 0))`).
+    pub fn level_for(&self, elevation: f32) -> u32 {
+        let mut level = 0;
+        for (i, &spacing) in self.intervals.iter().enumerate() {
+            if spacing > 0.0 && is_multiple(elevation, spacing) {
+                level = level.max(i as u32);
             }
-            out.push((elevation, level));
         }
-        out
+        level
     }
 }
 
@@ -105,8 +94,6 @@ pub struct ContourConfig {
     /// Buffer, in tile pixels, sampled from neighbors on every edge to keep
     /// contours continuous across seams.
     pub buffer_px: u32,
-    /// Smooth contour lines (the `contour` crate's smoothing flag).
-    pub smooth: bool,
     /// DEM tile URL template, with `{z}`/`{x}`/`{y}` (and `{-y}` for TMS)
     /// placeholders. Used by the FFI fetcher; the URL is what host code (and an
     /// HTTP interceptor) sees.
@@ -154,7 +141,6 @@ impl Default for ContourConfig {
             tile_size: 256,
             extent: 4096,
             buffer_px: 1,
-            smooth: true,
             dem_url_pattern: String::new(),
             dem_max_zoom: 12,
             overzoom: 0,
@@ -181,27 +167,16 @@ mod tests {
     }
 
     #[test]
-    fn levels_trace_minor_and_tag_major() {
+    fn level_tags_majors() {
         let rule = ThresholdRule {
             zoom: 11,
             intervals: vec![200.0, 1000.0],
         };
-        let levels = rule.levels(150.0, 2050.0);
-        assert_eq!(
-            levels,
-            vec![
-                (200.0, 0),
-                (400.0, 0),
-                (600.0, 0),
-                (800.0, 0),
-                (1000.0, 1),
-                (1200.0, 0),
-                (1400.0, 0),
-                (1600.0, 0),
-                (1800.0, 0),
-                (2000.0, 1),
-            ]
-        );
+        assert_eq!(rule.interval(), 200.0);
+        assert_eq!(rule.level_for(200.0), 0); // minor
+        assert_eq!(rule.level_for(800.0), 0);
+        assert_eq!(rule.level_for(1000.0), 1); // multiple of 1000 -> major
+        assert_eq!(rule.level_for(2000.0), 1);
     }
 
     #[test]

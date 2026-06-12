@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::buffer::sample_buffered;
 use crate::cache::DemCache;
 use crate::config::ContourConfig;
-use crate::contour::generate_contours;
+use crate::contour::contour_tile;
 use crate::dem::{decode_tile, DemGrid};
 use crate::error::Result;
 use crate::mvt::encode_mvt;
@@ -68,7 +68,14 @@ impl<S: TileSource> ContourTiler<S> {
             |c| self.dem_tile(c),
         )?;
 
-        let lines = generate_contours(&buffered, rule, self.config.multiplier, self.config.smooth)?;
-        encode_mvt(&lines, &self.config)
+        let contours = contour_tile(
+            &buffered,
+            self.config.tile_size,
+            self.config.buffer_px,
+            rule,
+            self.config.multiplier,
+            self.config.extent,
+        );
+        encode_mvt(&contours, &self.config)
     }
 }

@@ -31,8 +31,10 @@ Each pipeline stage is a single file (consolidated from the original
 - `cache.rs` — `DemCache`, LRU of decoded tiles.
 - `source.rs` — `TileSource` trait, `MockTileSource`, and `UrlTemplate`
   (`{z}/{x}/{y}`, `{-y}`).
-- `contour.rs` — `generate_contours(grid, rule, multiplier, smooth)` via the
-  `contour` crate (`f32` grid → `f64`).
+- `contour.rs` — one-pass marching squares ported from maplibre-contour's
+  `isolines.ts` (no external deps): `generate_isolines` (the engine, covered by
+  `tests/isolines.rs`) + `contour_tile` (samples the buffered grid, scales by
+  `multiplier`, tags major/minor `level`).
 - `mvt.rs` — `encode_mvt`: grid px → extent space, one layer with `ele`/`level`,
   geometry via geozero's `ToMvt`, serialized with prost.
 - `pipeline.rs` — `ContourTiler` resolves `source_zoom` + the active threshold

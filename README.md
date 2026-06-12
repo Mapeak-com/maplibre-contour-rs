@@ -24,7 +24,7 @@ TileCoord ──▶ fetch 3x3 neighborhood ──▶ decode DEM ──▶ assemb
 | Buffered + overzoomed sampling | [`buffer`](src/buffer.rs) | — |
 | Decoded-tile cache | [`cache`](src/cache.rs) | `lru` |
 | Per-zoom thresholds / config | [`config`](src/config.rs) | — |
-| Contour tracing | [`contour`](src/contour.rs) | `contour` |
+| Contour tracing (one-pass) | [`contour`](src/contour.rs) | — |
 | MVT encoding | [`mvt`](src/mvt.rs) | `geozero` |
 | Orchestration | [`pipeline`](src/pipeline.rs) | — |
 | Mobile bindings | [`ffi`](src/ffi.rs) (`--features ffi`) | `uniffi` |

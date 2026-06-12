@@ -281,7 +281,7 @@ private func makeRustCall<T, E: Swift.Error>(
     _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T,
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws -> T {
-    uniffiEnsureInitialized()
+    uniffiEnsureMaplibreContourRsInitialized()
     var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: errorHandler)
@@ -352,18 +352,29 @@ private func uniffiTraitInterfaceCallWithError<T, E>(
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
 }
-fileprivate class UniffiHandleMap<T> {
-    private var map: [UInt64: T] = [:]
+// Initial value and increment amount for handles. 
+// These ensure that SWIFT handles always have the lowest bit set
+fileprivate let UNIFFI_HANDLEMAP_INITIAL: UInt64 = 1
+fileprivate let UNIFFI_HANDLEMAP_DELTA: UInt64 = 2
+
+fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
+    // All mutation happens with this lock held, which is why we implement @unchecked Sendable.
     private let lock = NSLock()
-    private var currentHandle: UInt64 = 1
+    private var map: [UInt64: T] = [:]
+    private var currentHandle: UInt64 = UNIFFI_HANDLEMAP_INITIAL
 
     func insert(obj: T) -> UInt64 {
         lock.withLock {
-            let handle = currentHandle
-            currentHandle += 1
-            map[handle] = obj
-            return handle
+            return doInsert(obj)
         }
+    }
+
+    // Low-level insert function, this assumes `lock` is held.
+    private func doInsert(_ obj: T) -> UInt64 {
+        let handle = currentHandle
+        currentHandle += UNIFFI_HANDLEMAP_DELTA
+        map[handle] = obj
+        return handle
     }
 
      func get(handle: UInt64) throws -> T {
@@ -372,6 +383,15 @@ fileprivate class UniffiHandleMap<T> {
                 throw UniffiInternalError.unexpectedStaleHandle
             }
             return obj
+        }
+    }
+
+     func clone(handle: UInt64) throws -> UInt64 {
+        try lock.withLock {
+            guard let obj = map[handle] else {
+                throw UniffiInternalError.unexpectedStaleHandle
+            }
+            return doInsert(obj)
         }
     }
 
@@ -394,7 +414,13 @@ fileprivate class UniffiHandleMap<T> {
 
 
 // Public interface members begin here.
-
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+private let IDX_CALLBACK_FREE: Int32 = 0
+// Callback return codes
+private let UNIFFI_CALLBACK_SUCCESS: Int32 = 0
+private let UNIFFI_CALLBACK_ERROR: Int32 = 1
+private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -441,30 +467,6 @@ fileprivate struct FfiConverterFloat: FfiConverterPrimitive {
 
     public static func write(_ value: Float, into buf: inout [UInt8]) {
         writeFloat(&buf, lower(value))
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterBool : FfiConverter {
-    typealias FfiType = Int8
-    typealias SwiftType = Bool
-
-    public static func lift(_ value: Int8) throws -> Bool {
-        return value != 0
-    }
-
-    public static func lower(_ value: Bool) -> Int8 {
-        return value ? 1 : 0
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
-        return try lift(readInt(&buf))
-    }
-
-    public static func write(_ value: Bool, into buf: inout [UInt8]) {
-        writeInt(&buf, lower(value))
     }
 }
 
@@ -533,7 +535,7 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 /**
  * A contour tiler usable from Kotlin/Swift. Thread-safe; share one instance.
  */
-public protocol ContourTilerProtocol : AnyObject {
+public protocol ContourTilerProtocol: AnyObject, Sendable {
     
     /**
      * Generate the contour MVT for tile `z/x/y`.
@@ -541,68 +543,70 @@ public protocol ContourTilerProtocol : AnyObject {
     func tile(z: UInt8, x: UInt32, y: UInt32) throws  -> Data
     
 }
-
 /**
  * A contour tiler usable from Kotlin/Swift. Thread-safe; share one instance.
  */
-open class ContourTiler:
-    ContourTilerProtocol {
-    fileprivate let pointer: UnsafeMutableRawPointer!
+open class ContourTiler: ContourTilerProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
 
-    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public struct NoPointer {
+    public struct NoHandle {
         public init() {}
     }
 
     // TODO: We'd like this to be `private` but for Swifty reasons,
     // we can't implement `FfiConverter` without making this `required` and we can't
     // make it `required` without making it `public`.
-    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
-        self.pointer = pointer
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
     }
 
     // This constructor can be used to instantiate a fake object.
-    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
     //
     // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public init(noPointer: NoPointer) {
-        self.pointer = nil
+    public init(noHandle: NoHandle) {
+        self.handle = 0
     }
 
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
-        return try! rustCall { uniffi_maplibre_contour_rs_fn_clone_contourtiler(self.pointer, $0) }
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_maplibre_contour_rs_fn_clone_contourtiler(self.handle, $0) }
     }
     /**
      * Build a tiler from a fetcher and configuration. The DEM URL pattern is
      * taken from `config.dem_url_pattern`.
      */
 public convenience init(fetcher: DemTileFetcher, config: ContourConfig) {
-    let pointer =
+    let handle =
         try! rustCall() {
     uniffi_maplibre_contour_rs_fn_constructor_contourtiler_new(
-        FfiConverterTypeDemTileFetcher.lower(fetcher),
-        FfiConverterTypeContourConfig.lower(config),$0
+        FfiConverterTypeDemTileFetcher_lower(fetcher),
+        FfiConverterTypeContourConfig_lower(config),$0
     )
 }
-    self.init(unsafeFromRawPointer: pointer)
+    self.init(unsafeFromHandle: handle)
 }
 
     deinit {
-        guard let pointer = pointer else {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
             return
         }
 
-        try! rustCall { uniffi_maplibre_contour_rs_fn_free_contourtiler(pointer, $0) }
+        try! rustCall { uniffi_maplibre_contour_rs_fn_free_contourtiler(handle, $0) }
     }
 
     
@@ -611,9 +615,10 @@ public convenience init(fetcher: DemTileFetcher, config: ContourConfig) {
     /**
      * Generate the contour MVT for tile `z/x/y`.
      */
-open func tile(z: UInt8, x: UInt32, y: UInt32)throws  -> Data {
-    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
-    uniffi_maplibre_contour_rs_fn_method_contourtiler_tile(self.uniffiClonePointer(),
+open func tile(z: UInt8, x: UInt32, y: UInt32)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_maplibre_contour_rs_fn_method_contourtiler_tile(
+            self.uniffiCloneHandle(),
         FfiConverterUInt8.lower(z),
         FfiConverterUInt32.lower(x),
         FfiConverterUInt32.lower(y),$0
@@ -622,152 +627,160 @@ open func tile(z: UInt8, x: UInt32, y: UInt32)throws  -> Data {
 }
     
 
+    
 }
+
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeContourTiler: FfiConverter {
-
-    typealias FfiType = UnsafeMutableRawPointer
+    typealias FfiType = UInt64
     typealias SwiftType = ContourTiler
 
-    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> ContourTiler {
-        return ContourTiler(unsafeFromRawPointer: pointer)
+    public static func lift(_ handle: UInt64) throws -> ContourTiler {
+        return ContourTiler(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: ContourTiler) -> UnsafeMutableRawPointer {
-        return value.uniffiClonePointer()
+    public static func lower(_ value: ContourTiler) -> UInt64 {
+        return value.uniffiCloneHandle()
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ContourTiler {
-        let v: UInt64 = try readInt(&buf)
-        // The Rust code won't compile if a pointer won't fit in a UInt64.
-        // We have to go via `UInt` because that's the thing that's the size of a pointer.
-        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if (ptr == nil) {
-            throw UniffiInternalError.unexpectedNullPointer
-        }
-        return try lift(ptr!)
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
     }
 
     public static func write(_ value: ContourTiler, into buf: inout [UInt8]) {
-        // This fiddling is because `Int` is the thing that's the same size as a pointer.
-        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+        writeInt(&buf, lower(value))
     }
 }
 
 
-
-
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeContourTiler_lift(_ pointer: UnsafeMutableRawPointer) throws -> ContourTiler {
-    return try FfiConverterTypeContourTiler.lift(pointer)
+public func FfiConverterTypeContourTiler_lift(_ handle: UInt64) throws -> ContourTiler {
+    return try FfiConverterTypeContourTiler.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeContourTiler_lower(_ value: ContourTiler) -> UnsafeMutableRawPointer {
+public func FfiConverterTypeContourTiler_lower(_ value: ContourTiler) -> UInt64 {
     return FfiConverterTypeContourTiler.lower(value)
 }
 
 
 
 
+
+
 /**
  * Returns the DEM PNG bytes for a tile URL. Implemented on the host side
  * (e.g. an OkHttp call that your interceptor can catch); return `None` for a
  * tile with no data.
  */
-public protocol DemTileFetcher : AnyObject {
+public protocol DemTileFetcher: AnyObject, Sendable {
     
     func fetch(url: String) throws  -> Data?
     
 }
-
 /**
  * Returns the DEM PNG bytes for a tile URL. Implemented on the host side
  * (e.g. an OkHttp call that your interceptor can catch); return `None` for a
  * tile with no data.
  */
-open class DemTileFetcherImpl:
-    DemTileFetcher {
-    fileprivate let pointer: UnsafeMutableRawPointer!
+open class DemTileFetcherImpl: DemTileFetcher, @unchecked Sendable {
+    fileprivate let handle: UInt64
 
-    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public struct NoPointer {
+    public struct NoHandle {
         public init() {}
     }
 
     // TODO: We'd like this to be `private` but for Swifty reasons,
     // we can't implement `FfiConverter` without making this `required` and we can't
     // make it `required` without making it `public`.
-    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
-        self.pointer = pointer
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
     }
 
     // This constructor can be used to instantiate a fake object.
-    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
     //
     // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public init(noPointer: NoPointer) {
-        self.pointer = nil
+    public init(noHandle: NoHandle) {
+        self.handle = 0
     }
 
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
-        return try! rustCall { uniffi_maplibre_contour_rs_fn_clone_demtilefetcher(self.pointer, $0) }
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_maplibre_contour_rs_fn_clone_demtilefetcher(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
     deinit {
-        guard let pointer = pointer else {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
             return
         }
 
-        try! rustCall { uniffi_maplibre_contour_rs_fn_free_demtilefetcher(pointer, $0) }
+        try! rustCall { uniffi_maplibre_contour_rs_fn_free_demtilefetcher(handle, $0) }
     }
 
     
 
     
-open func fetch(url: String)throws  -> Data? {
-    return try  FfiConverterOptionData.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
-    uniffi_maplibre_contour_rs_fn_method_demtilefetcher_fetch(self.uniffiClonePointer(),
+open func fetch(url: String)throws  -> Data?  {
+    return try  FfiConverterOptionData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_maplibre_contour_rs_fn_method_demtilefetcher_fetch(
+            self.uniffiCloneHandle(),
         FfiConverterString.lower(url),$0
     )
 })
 }
     
 
+    
 }
-// Magic number for the Rust proxy to call using the same mechanism as every other method,
-// to free the callback once it's dropped by Rust.
-private let IDX_CALLBACK_FREE: Int32 = 0
-// Callback return codes
-private let UNIFFI_CALLBACK_SUCCESS: Int32 = 0
-private let UNIFFI_CALLBACK_ERROR: Int32 = 1
-private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
+
+
 
 // Put the implementation in a struct so we don't pollute the top-level namespace
 fileprivate struct UniffiCallbackInterfaceDemTileFetcher {
 
     // Create the VTable using a series of closures.
     // Swift automatically converts these into C callback functions.
-    static var vtable: UniffiVTableCallbackInterfaceDemTileFetcher = UniffiVTableCallbackInterfaceDemTileFetcher(
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceDemTileFetcher = UniffiVTableCallbackInterfaceDemTileFetcher(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeDemTileFetcher.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface DemTileFetcher: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeDemTileFetcher.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface DemTileFetcher: handle missing in uniffiClone")
+            }
+        },
         fetch: { (
             uniffiHandle: UInt64,
             url: RustBuffer,
@@ -790,82 +803,86 @@ fileprivate struct UniffiCallbackInterfaceDemTileFetcher {
                 callStatus: uniffiCallStatus,
                 makeCall: makeCall,
                 writeReturn: writeReturn,
-                lowerError: FfiConverterTypeFfiError.lower
+                lowerError: FfiConverterTypeFfiError_lower
             )
-        },
-        uniffiFree: { (uniffiHandle: UInt64) -> () in
-            let result = try? FfiConverterTypeDemTileFetcher.handleMap.remove(handle: uniffiHandle)
-            if result == nil {
-                print("Uniffi callback interface DemTileFetcher: handle missing in uniffiFree")
-            }
         }
     )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceDemTileFetcher> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceDemTileFetcher>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
 }
 
 private func uniffiCallbackInitDemTileFetcher() {
-    uniffi_maplibre_contour_rs_fn_init_callback_vtable_demtilefetcher(&UniffiCallbackInterfaceDemTileFetcher.vtable)
+    uniffi_maplibre_contour_rs_fn_init_callback_vtable_demtilefetcher(UniffiCallbackInterfaceDemTileFetcher.vtablePtr)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeDemTileFetcher: FfiConverter {
-    fileprivate static var handleMap = UniffiHandleMap<DemTileFetcher>()
+    fileprivate static let handleMap = UniffiHandleMap<DemTileFetcher>()
 
-    typealias FfiType = UnsafeMutableRawPointer
+    typealias FfiType = UInt64
     typealias SwiftType = DemTileFetcher
 
-    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> DemTileFetcher {
-        return DemTileFetcherImpl(unsafeFromRawPointer: pointer)
+    public static func lift(_ handle: UInt64) throws -> DemTileFetcher {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return DemTileFetcherImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
     }
 
-    public static func lower(_ value: DemTileFetcher) -> UnsafeMutableRawPointer {
-        guard let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: handleMap.insert(obj: value))) else {
-            fatalError("Cast to UnsafeMutableRawPointer failed")
-        }
-        return ptr
+    public static func lower(_ value: DemTileFetcher) -> UInt64 {
+         if let rustImpl = value as? DemTileFetcherImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DemTileFetcher {
-        let v: UInt64 = try readInt(&buf)
-        // The Rust code won't compile if a pointer won't fit in a UInt64.
-        // We have to go via `UInt` because that's the thing that's the size of a pointer.
-        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if (ptr == nil) {
-            throw UniffiInternalError.unexpectedNullPointer
-        }
-        return try lift(ptr!)
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
     }
 
     public static func write(_ value: DemTileFetcher, into buf: inout [UInt8]) {
-        // This fiddling is because `Int` is the thing that's the same size as a pointer.
-        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+        writeInt(&buf, lower(value))
     }
 }
 
 
-
-
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeDemTileFetcher_lift(_ pointer: UnsafeMutableRawPointer) throws -> DemTileFetcher {
-    return try FfiConverterTypeDemTileFetcher.lift(pointer)
+public func FfiConverterTypeDemTileFetcher_lift(_ handle: UInt64) throws -> DemTileFetcher {
+    return try FfiConverterTypeDemTileFetcher.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeDemTileFetcher_lower(_ value: DemTileFetcher) -> UnsafeMutableRawPointer {
+public func FfiConverterTypeDemTileFetcher_lower(_ value: DemTileFetcher) -> UInt64 {
     return FfiConverterTypeDemTileFetcher.lower(value)
 }
+
+
 
 
 /**
  * Everything needed to turn DEM tiles into contour MVT tiles.
  */
-public struct ContourConfig {
+public struct ContourConfig: Equatable, Hashable {
     /**
      * DEM pixel encoding.
      */
@@ -883,10 +900,6 @@ public struct ContourConfig {
      * contours continuous across seams.
      */
     public var bufferPx: UInt32
-    /**
-     * Smooth contour lines (the `contour` crate's smoothing flag).
-     */
-    public var smooth: Bool
     /**
      * DEM tile URL template, with `{z}`/`{x}`/`{y}` (and `{-y}` for TMS)
      * placeholders. Used by the FFI fetcher; the URL is what host code (and an
@@ -943,9 +956,6 @@ public struct ContourConfig {
          * contours continuous across seams.
          */bufferPx: UInt32, 
         /**
-         * Smooth contour lines (the `contour` crate's smoothing flag).
-         */smooth: Bool, 
-        /**
          * DEM tile URL template, with `{z}`/`{x}`/`{y}` (and `{-y}` for TMS)
          * placeholders. Used by the FFI fetcher; the URL is what host code (and an
          * HTTP interceptor) sees.
@@ -979,7 +989,6 @@ public struct ContourConfig {
         self.tileSize = tileSize
         self.extent = extent
         self.bufferPx = bufferPx
-        self.smooth = smooth
         self.demUrlPattern = demUrlPattern
         self.demMaxZoom = demMaxZoom
         self.overzoom = overzoom
@@ -989,71 +998,15 @@ public struct ContourConfig {
         self.elevationKey = elevationKey
         self.levelKey = levelKey
     }
+
+    
+
+    
 }
 
-
-
-extension ContourConfig: Equatable, Hashable {
-    public static func ==(lhs: ContourConfig, rhs: ContourConfig) -> Bool {
-        if lhs.encoding != rhs.encoding {
-            return false
-        }
-        if lhs.tileSize != rhs.tileSize {
-            return false
-        }
-        if lhs.extent != rhs.extent {
-            return false
-        }
-        if lhs.bufferPx != rhs.bufferPx {
-            return false
-        }
-        if lhs.smooth != rhs.smooth {
-            return false
-        }
-        if lhs.demUrlPattern != rhs.demUrlPattern {
-            return false
-        }
-        if lhs.demMaxZoom != rhs.demMaxZoom {
-            return false
-        }
-        if lhs.overzoom != rhs.overzoom {
-            return false
-        }
-        if lhs.thresholds != rhs.thresholds {
-            return false
-        }
-        if lhs.multiplier != rhs.multiplier {
-            return false
-        }
-        if lhs.layerName != rhs.layerName {
-            return false
-        }
-        if lhs.elevationKey != rhs.elevationKey {
-            return false
-        }
-        if lhs.levelKey != rhs.levelKey {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(encoding)
-        hasher.combine(tileSize)
-        hasher.combine(extent)
-        hasher.combine(bufferPx)
-        hasher.combine(smooth)
-        hasher.combine(demUrlPattern)
-        hasher.combine(demMaxZoom)
-        hasher.combine(overzoom)
-        hasher.combine(thresholds)
-        hasher.combine(multiplier)
-        hasher.combine(layerName)
-        hasher.combine(elevationKey)
-        hasher.combine(levelKey)
-    }
-}
-
+#if compiler(>=6)
+extension ContourConfig: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1066,7 +1019,6 @@ public struct FfiConverterTypeContourConfig: FfiConverterRustBuffer {
                 tileSize: FfiConverterUInt32.read(from: &buf), 
                 extent: FfiConverterUInt32.read(from: &buf), 
                 bufferPx: FfiConverterUInt32.read(from: &buf), 
-                smooth: FfiConverterBool.read(from: &buf), 
                 demUrlPattern: FfiConverterString.read(from: &buf), 
                 demMaxZoom: FfiConverterUInt8.read(from: &buf), 
                 overzoom: FfiConverterUInt8.read(from: &buf), 
@@ -1083,7 +1035,6 @@ public struct FfiConverterTypeContourConfig: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.tileSize, into: &buf)
         FfiConverterUInt32.write(value.extent, into: &buf)
         FfiConverterUInt32.write(value.bufferPx, into: &buf)
-        FfiConverterBool.write(value.smooth, into: &buf)
         FfiConverterString.write(value.demUrlPattern, into: &buf)
         FfiConverterUInt8.write(value.demMaxZoom, into: &buf)
         FfiConverterUInt8.write(value.overzoom, into: &buf)
@@ -1120,7 +1071,7 @@ public func FfiConverterTypeContourConfig_lower(_ value: ContourConfig) -> RustB
  * elevation is a multiple of `intervals[i]`. So `[200, 1000]` traces every
  * 200 m and marks every 1000 m as major (`level = 1`).
  */
-public struct ThresholdRule {
+public struct ThresholdRule: Equatable, Hashable {
     /**
      * Lowest zoom this rule applies to (used by [`ContourConfig::thresholds_for`]).
      */
@@ -1142,27 +1093,15 @@ public struct ThresholdRule {
         self.zoom = zoom
         self.intervals = intervals
     }
+
+    
+
+    
 }
 
-
-
-extension ThresholdRule: Equatable, Hashable {
-    public static func ==(lhs: ThresholdRule, rhs: ThresholdRule) -> Bool {
-        if lhs.zoom != rhs.zoom {
-            return false
-        }
-        if lhs.intervals != rhs.intervals {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(zoom)
-        hasher.combine(intervals)
-    }
-}
-
+#if compiler(>=6)
+extension ThresholdRule: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1203,7 +1142,7 @@ public func FfiConverterTypeThresholdRule_lower(_ value: ThresholdRule) -> RustB
  * How elevation (meters) is packed into the RGB channels of a DEM tile.
  */
 
-public enum Encoding {
+public enum Encoding: Equatable, Hashable {
     
     /**
      * Mapbox Terrain-RGB: `height = -10000 + (R*65536 + G*256 + B) * 0.1`.
@@ -1213,8 +1152,16 @@ public enum Encoding {
      * Terrarium (AWS open dataset): `height = R*256 + G + B/256 - 32768`.
      */
     case terrarium
+
+
+
+
+
 }
 
+#if compiler(>=6)
+extension Encoding: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1266,22 +1213,30 @@ public func FfiConverterTypeEncoding_lower(_ value: Encoding) -> RustBuffer {
 
 
 
-extension Encoding: Equatable, Hashable {}
-
-
-
-
 /**
  * Error surfaced across the FFI boundary (flattened to its message).
  */
-public enum FfiError {
+public enum FfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
     
     
     case Tiler(message: String)
     
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
 }
 
+#if compiler(>=6)
+extension FfiError: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1320,12 +1275,18 @@ public struct FfiConverterTypeFfiError: FfiConverterRustBuffer {
 }
 
 
-extension FfiError: Equatable, Hashable {}
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiError_lift(_ buf: RustBuffer) throws -> FfiError {
+    return try FfiConverterTypeFfiError.lift(buf)
+}
 
-extension FfiError: Foundation.LocalizedError {
-    public var errorDescription: String? {
-        String(reflecting: self)
-    }
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiError_lower(_ value: FfiError) -> RustBuffer {
+    return FfiConverterTypeFfiError.lower(value)
 }
 
 #if swift(>=5.8)
@@ -1404,8 +1365,8 @@ fileprivate struct FfiConverterSequenceTypeThresholdRule: FfiConverterRustBuffer
 /**
  * A default [`ContourConfig`] (Terrarium, 256 px, 4096 extent) to tweak.
  */
-public func defaultConfig() -> ContourConfig {
-    return try!  FfiConverterTypeContourConfig.lift(try! rustCall() {
+public func defaultConfig() -> ContourConfig  {
+    return try!  FfiConverterTypeContourConfig_lift(try! rustCall() {
     uniffi_maplibre_contour_rs_fn_func_default_config($0
     )
 })
@@ -1414,7 +1375,7 @@ public func defaultConfig() -> ContourConfig {
  * Parse maplibre-contour's threshold spec, e.g. `"11*200*1000~12*10*100"`,
  * into per-zoom rules for [`ContourConfig::thresholds`].
  */
-public func parseThresholdSpec(spec: String) -> [ThresholdRule] {
+public func parseThresholdSpec(spec: String) -> [ThresholdRule]  {
     return try!  FfiConverterSequenceTypeThresholdRule.lift(try! rustCall() {
     uniffi_maplibre_contour_rs_fn_func_parse_threshold_spec(
         FfiConverterString.lower(spec),$0
@@ -1429,27 +1390,27 @@ private enum InitializationResult {
 }
 // Use a global variable to perform the versioning checks. Swift ensures that
 // the code inside is only computed once.
-private var initializationResult: InitializationResult = {
+private let initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
-    let bindings_contract_version = 26
+    let bindings_contract_version = 30
     // Get the scaffolding contract version by calling the into the dylib
     let scaffolding_contract_version = ffi_maplibre_contour_rs_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_func_default_config() != 8708) {
+    if (uniffi_maplibre_contour_rs_checksum_func_default_config() != 58162) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_func_parse_threshold_spec() != 58062) {
+    if (uniffi_maplibre_contour_rs_checksum_func_parse_threshold_spec() != 26605) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_method_contourtiler_tile() != 16009) {
+    if (uniffi_maplibre_contour_rs_checksum_method_contourtiler_tile() != 6864) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_method_demtilefetcher_fetch() != 37285) {
+    if (uniffi_maplibre_contour_rs_checksum_method_demtilefetcher_fetch() != 9923) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_constructor_contourtiler_new() != 24027) {
+    if (uniffi_maplibre_contour_rs_checksum_constructor_contourtiler_new() != 50620) {
         return InitializationResult.apiChecksumMismatch
     }
 
@@ -1457,7 +1418,9 @@ private var initializationResult: InitializationResult = {
     return InitializationResult.ok
 }()
 
-private func uniffiEnsureInitialized() {
+// Make the ensure init function public so that other modules which have external type references to
+// our types can call it.
+public func uniffiEnsureMaplibreContourRsInitialized() {
     switch initializationResult {
     case .ok:
         break
