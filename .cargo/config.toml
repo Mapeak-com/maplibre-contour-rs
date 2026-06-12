@@ -1,0 +1,7 @@
+# 16 KB ELF alignment for Android 15+ (NDK r28 default; explicit = NDK-agnostic).
+# Target-specific, so it doesn't affect host or Apple builds.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

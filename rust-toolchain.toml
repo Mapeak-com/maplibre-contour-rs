@@ -1,5 +1,0 @@
-[toolchain]
-channel = "stable"
-components = ["rustfmt", "clippy"]
-# Mobile targets are added per-job by the release workflow (and locally with
-# `rustup target add ...`), so a plain build doesn't download std for every ABI.

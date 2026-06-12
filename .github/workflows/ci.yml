@@ -11,31 +11,65 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
 
 jobs:
-  check:
+  core:
+    name: Rust core
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
 
       - name: Format
         run: cargo fmt --all -- --check
-
-      - name: Build (core, no features)
-        run: cargo build --locked
-
-      - name: Clippy (all features)
+      - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Test (default)
-        run: cargo test --locked
-
-      - name: Test (ffi)
-        run: cargo test --locked --features ffi
-
+      - name: Test
+        run: cargo test --all-features
       - name: Docs
         run: cargo doc --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
+
+  android:
+    name: Android AAR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Install NDK
+        run: sdkmanager --install "ndk;28.2.13676358"
+      - name: Publish to Maven local (same command JitPack runs)
+        working-directory: android
+        run: ./gradlew :contour:publishToMavenLocal --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v7
+        with:
+          name: contour-aar
+          path: android/contour/build/outputs/aar/*.aar
+
+  ios:
+    name: iOS XCFramework + SwiftPM
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build XCFramework + generate Swift bindings
+        run: ./scripts/build-xcframework.sh
+      - name: Check committed Swift bindings are up to date
+        run: git diff --exit-code -- Sources/MaplibreContour/maplibre_contour_rs.swift
+      - name: Build SwiftPM package
+        run: swift build

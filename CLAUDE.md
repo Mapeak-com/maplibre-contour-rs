@@ -65,17 +65,22 @@ in that module's rustdoc. Key points:
 - The `uniffi-bindgen` binary (built with `--features uniffi-cli`) generates the
   Kotlin/Swift sources from the compiled library; the CLI deps are gated so a
   plain `--features ffi` mobile build stays lean.
-- Prebuilt Android/iOS artifacts are produced by `.github/workflows/release.yml`
-  on a `v*` tag (or a version bump merged to `main`) and attached to the GitHub
-  Release; that workflow is also the source of truth for the build steps.
-- Distribution packaging (no registries):
-  - **iOS / SwiftPM** — `Package.swift` (xcframework as a remote `binaryTarget`)
-    + the committed `Sources/MaplibreContour/maplibre_contour_rs.swift` wrapper.
-    The release job stamps the per-release `url`/`checksum` onto the tag.
-  - **Android / JitPack** — the `:android` Gradle library (`android/build.gradle`,
-    `settings.gradle`, `build.gradle`, `jitpack.yml`) downloads the release's
-    `jniLibs` + Kotlin bindings and packages an AAR. No `.so`/wrapper is built in
-    JitPack; the Gradle wrapper is bootstrapped by `jitpack.yml`.
+- Packaging mirrors the proven `Mapeak-com/pmtiles-mobile` setup (`ci.yml`
+  builds the Rust core, the Android AAR, and the iOS xcframework on every push):
+  - **iOS / SwiftPM** — `scripts/build-xcframework.sh` builds the `.a` per Apple
+    target (iOS + macOS, so CI `swift build` links), generates the committed
+    `Sources/MaplibreContour/maplibre_contour_rs.swift`, and assembles
+    `artifacts/MaplibreContourFFI.xcframework`. `Package.swift` is path-based on
+    `main`; the release job pins it to the release `url`/`checksum` on the tag.
+  - **Android / JitPack** — the self-contained `android/` Gradle project (module
+    `:contour`, committed wrapper) cross-compiles the `.so` per ABI via
+    `cargo-ndk` and generates the UniFFI Kotlin in the Gradle build. `jitpack.yml`
+    runs the same `:contour:publishToMavenLocal`. `.cargo/config.toml` forces
+    16 KB ELF alignment (Android 15+); the JNA `@aar` + disabled module metadata
+    avoid `UnsatisfiedLinkError`. `uniffi.toml` sets the Kotlin package.
+  - **Release** — `release.yml` is a manual `workflow_dispatch` (patch/minor/
+    major); it computes the next version from git tags, `cargo set-version`s
+    `Cargo.toml`, builds, pins `Package.swift`, and pushes the tag only.
 - Keep the core crate free of native C deps (no GDAL/GEOS `geozero` features),
   otherwise cross-compilation gets painful.
 

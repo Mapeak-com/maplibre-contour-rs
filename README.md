@@ -86,9 +86,9 @@ needed.
 ### iOS — Swift Package Manager
 
 In Xcode: **File → Add Packages →** `https://github.com/mapeak-com/maplibre-contour-rs`,
-pinned to a version `>=` the first release. [`Package.swift`](Package.swift)
-vends the compiled `.xcframework` as a binary target (downloaded from the
-release) plus the generated Swift wrapper.
+pinned to a version tag. [`Package.swift`](Package.swift) vends the compiled
+`.xcframework` (downloaded from the release on a tag) plus the generated Swift
+wrapper.
 
 ```swift
 import MaplibreContour
@@ -97,40 +97,39 @@ let tiler = ContourTiler(fetcher: myFetcher, config: defaultConfig())
 
 ### Android — JitPack
 
-Add JitPack and the dependency (`v<tag>` or a commit):
+Add JitPack and the dependency:
 
 ```groovy
 repositories { maven { url 'https://jitpack.io' } }
 dependencies {
-    implementation 'com.github.mapeak-com.maplibre-contour-rs:android:v0.1.0'
+    implementation 'com.github.mapeak-com.maplibre-contour-rs:contour:v0.1.0'
 }
 ```
 
-JitPack builds [`android/`](android/build.gradle) from the tag, pulling the
-prebuilt `jniLibs` + Kotlin bindings from that release. (JNA comes transitively.)
+JitPack builds [`android/`](android/contour/build.gradle.kts) from the tag,
+cross-compiling the Rust `.so` per ABI with `cargo-ndk` and generating the
+UniFFI Kotlin bindings during the Gradle build (JNA comes transitively).
 
 ### How releases are produced
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) builds the
-Android (`jniLibs` + Kotlin) and iOS (`.xcframework`) artifacts, attaches them to
-the [GitHub Release](../../releases), and stamps `Package.swift` with that
-release's URL + checksum on the tag. It runs automatically when the version in
-`Cargo.toml` changes on `main` — use the **Bump version** workflow to open that
-PR. Run the Release workflow manually (its `workflow_dispatch` button) to cut
-the first release, or to retry a version whose tag doesn't exist yet.
+Run the **Release (bump version)** workflow
+([`.github/workflows/release.yml`](.github/workflows/release.yml)) and pick
+`patch`/`minor`/`major`. It bumps the version, builds the iOS XCFramework, pins
+`Package.swift` to the release asset (url + checksum) on the tagged commit,
+pushes the tag, and attaches the XCFramework to the
+[GitHub Release](../../releases). JitPack builds the Android AAR from the same
+tag on first request. `main` keeps the path-based `Package.swift` for local dev.
 
-> First-release notes: the Android `:android` build relies on the Gradle wrapper
-> that `jitpack.yml` bootstraps; verify the first build at `jitpack.io`. iOS
-> resolves only from a real version tag (not `main`, which holds placeholder
-> `url`/`checksum`).
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) mirrors this: every
+push builds the Rust core, the Android AAR (`./gradlew publishToMavenLocal`, the
+same command JitPack runs), and the iOS XCFramework + SwiftPM package — so
+packaging/dependency breakage is caught before a release.
 
-To generate bindings locally instead:
+To build the bindings/xcframework locally:
 
 ```bash
-cargo build --release --features ffi
-cargo run --features uniffi-cli --bin uniffi-bindgen -- generate \
-    --library target/release/libmaplibre_contour_rs.dylib \
-    --language swift --out-dir bindings
+./scripts/build-xcframework.sh            # iOS/macOS xcframework + Swift wrapper
+( cd android && ./gradlew :contour:assembleRelease )   # Android AAR
 ```
 
 ## License
