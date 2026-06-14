@@ -18,9 +18,9 @@ categories = ["science::geo"]
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [dependencies]
-# PNG decoding of the raster-DEM tile. We only need PNG, so trim defaults.
+# Decode the raster-DEM tile (Terrarium/Terrain-RGB ships as PNG or WebP).
 # Pinned exact: image >= 0.25.6 raises its MSRV past what we target here.
-image = { version = "=0.25.10", default-features = false, features = ["png"] }
+image = { version = "=0.25.10", default-features = false, features = ["png", "webp"] }
 # Geometry primitives passed to the MVT encoder.
 geo-types = "0.7"
 # geo-types -> MVT encoding bridge (and GeoJSON for debugging).

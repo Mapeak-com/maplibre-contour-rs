@@ -64,8 +64,9 @@ impl DemGrid {
     }
 }
 
-/// Decode PNG `bytes` into an elevation grid (RGBA8 → [`Encoding::decode`]),
-/// keeping the PNG's exact pixel dimensions.
+/// Decode raster-DEM `bytes` (PNG or WebP) into an elevation grid
+/// (RGBA8 → [`Encoding::decode`]), keeping the image's exact pixel dimensions.
+/// The format is detected from the bytes.
 pub fn decode_tile(bytes: &[u8], encoding: Encoding) -> Result<DemGrid> {
     let img = image::load_from_memory(bytes)?.to_rgba8();
     let (width, height) = img.dimensions();
