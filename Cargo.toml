@@ -1,6 +1,6 @@
 [package]
 name = "maplibre-contour-rs"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 # Bumped from the scaffold's 1.75: the pinned `image`/`geozero` stack needs a
 # newer compiler than that. CI builds on stable.
