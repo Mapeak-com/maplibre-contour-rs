@@ -84,8 +84,6 @@ pub fn parse_thresholds(spec: &str) -> Vec<ThresholdRule> {
 pub struct ContourConfig {
     /// DEM pixel encoding.
     pub encoding: Encoding,
-    /// Source DEM tile size in pixels (256 or 512).
-    pub tile_size: u32,
     /// Output MVT extent (almost always 4096).
     pub extent: u32,
     /// Buffer, in tile pixels, sampled from neighbors on every edge to keep
@@ -135,7 +133,6 @@ impl Default for ContourConfig {
     fn default() -> Self {
         Self {
             encoding: Encoding::Terrarium,
-            tile_size: 256,
             extent: 4096,
             buffer_px: 1,
             dem_url_pattern: String::new(),

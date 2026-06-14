@@ -68,7 +68,6 @@ fn main() {
 
     let config = ContourConfig {
         encoding: Encoding::Terrarium,
-        tile_size: TILE,
         // Every 100 m, major every 500 m, from zoom 0 up.
         thresholds: vec![ThresholdRule {
             zoom: 0,

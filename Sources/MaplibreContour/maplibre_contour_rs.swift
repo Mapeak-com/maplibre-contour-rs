@@ -888,10 +888,6 @@ public struct ContourConfig: Equatable, Hashable {
      */
     public var encoding: Encoding
     /**
-     * Source DEM tile size in pixels (256 or 512).
-     */
-    public var tileSize: UInt32
-    /**
      * Output MVT extent (almost always 4096).
      */
     public var extent: UInt32
@@ -946,9 +942,6 @@ public struct ContourConfig: Equatable, Hashable {
          * DEM pixel encoding.
          */encoding: Encoding, 
         /**
-         * Source DEM tile size in pixels (256 or 512).
-         */tileSize: UInt32, 
-        /**
          * Output MVT extent (almost always 4096).
          */extent: UInt32, 
         /**
@@ -986,7 +979,6 @@ public struct ContourConfig: Equatable, Hashable {
          * Attribute key for the major/minor level.
          */levelKey: String) {
         self.encoding = encoding
-        self.tileSize = tileSize
         self.extent = extent
         self.bufferPx = bufferPx
         self.demUrlPattern = demUrlPattern
@@ -1016,7 +1008,6 @@ public struct FfiConverterTypeContourConfig: FfiConverterRustBuffer {
         return
             try ContourConfig(
                 encoding: FfiConverterTypeEncoding.read(from: &buf), 
-                tileSize: FfiConverterUInt32.read(from: &buf), 
                 extent: FfiConverterUInt32.read(from: &buf), 
                 bufferPx: FfiConverterUInt32.read(from: &buf), 
                 demUrlPattern: FfiConverterString.read(from: &buf), 
@@ -1032,7 +1023,6 @@ public struct FfiConverterTypeContourConfig: FfiConverterRustBuffer {
 
     public static func write(_ value: ContourConfig, into buf: inout [UInt8]) {
         FfiConverterTypeEncoding.write(value.encoding, into: &buf)
-        FfiConverterUInt32.write(value.tileSize, into: &buf)
         FfiConverterUInt32.write(value.extent, into: &buf)
         FfiConverterUInt32.write(value.bufferPx, into: &buf)
         FfiConverterString.write(value.demUrlPattern, into: &buf)

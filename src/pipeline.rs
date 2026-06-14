@@ -60,17 +60,24 @@ impl<S: TileSource> ContourTiler<S> {
         };
 
         let source_zoom = self.config.source_zoom(coord.z);
-        let buffered = sample_buffered(
-            coord,
-            source_zoom,
-            self.config.tile_size,
-            self.config.buffer_px,
-            |c| self.dem_tile(c),
-        )?;
+
+        // Tile pixel size is read from the DEM itself (256, 512, …), like
+        // maplibre-contour — never assumed — so it can't be misconfigured.
+        let dz = coord.z - source_zoom;
+        let center = TileCoord::new(source_zoom, coord.x >> dz, coord.y >> dz);
+        let Some(center_grid) = self.dem_tile(center)? else {
+            return encode_mvt(&[], &self.config);
+        };
+        let tile_size = center_grid.width;
+
+        let buffered =
+            sample_buffered(coord, source_zoom, tile_size, self.config.buffer_px, |c| {
+                self.dem_tile(c)
+            })?;
 
         let contours = contour_tile(
             &buffered,
-            self.config.tile_size,
+            tile_size,
             self.config.buffer_px,
             rule,
             self.config.multiplier,

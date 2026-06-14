@@ -105,7 +105,6 @@ mod tests {
     #[test]
     fn encodes_one_layer_with_attributes() {
         let config = ContourConfig {
-            tile_size: 256,
             extent: 4096,
             buffer_px: 1,
             ..Default::default()
