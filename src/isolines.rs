@@ -266,7 +266,7 @@ pub struct Contour {
 ///
 /// 1. crop the ancestor to this tile's area (`source_width >> dz` pixels);
 /// 2. upsample (bilinear, pixel-center aligned) until the grid is at least
-///    [`SUBSAMPLE_BELOW`] wide — so heavily-overzoomed tiles trace from a small,
+///    `SUBSAMPLE_BELOW` wide — so heavily-overzoomed tiles trace from a small,
 ///    smooth grid rather than the full source resolution;
 /// 3. `averagePixelCentersToGrid` — each grid corner is the mean of its four
 ///    neighbouring pixel centres (a `W+1`-wide grid mapped with `extent/W` units
