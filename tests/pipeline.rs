@@ -47,7 +47,6 @@ fn dem_png(tile_x: u32, tile_y: u32, height: impl Fn(f64, f64) -> f32) -> Vec<u8
 
 fn config() -> ContourConfig {
     ContourConfig {
-        tile_size: TILE,
         extent: 4096,
         buffer_px: 1,
         thresholds: vec![ThresholdRule {
@@ -150,7 +149,6 @@ fn overzooms_above_dem_max_zoom() {
     let source = MockTileSource { tiles };
 
     let cfg = ContourConfig {
-        tile_size: TILE,
         extent: 4096,
         buffer_px: 1,
         dem_max_zoom: dem_z,

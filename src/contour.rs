@@ -256,6 +256,13 @@ pub struct Contour {
 /// [`crate::buffer::sample_buffered`]), scaling sampled elevations by
 /// `multiplier`. Coordinates come out in `0..extent` tile space (the center
 /// tile occupies the full range; the buffer margin lands just outside it).
+///
+/// The buffered grid holds elevations at *pixel centers*; following
+/// maplibre-contour, each grid value fed to the tracer is the average of the
+/// four surrounding pixels (`averagePixelCentersToGrid`). That puts samples on
+/// pixel corners — a `(tile_size + 1)`-wide grid mapped with `extent/tile_size`
+/// units per pixel — which is what keeps contours aligned with the DEM (and
+/// lightly smooths them), instead of a half-pixel-shifted `extent/(tile_size-1)`.
 pub fn contour_tile(
     buffered: &DemGrid,
     tile_size: u32,
@@ -273,13 +280,30 @@ pub fn contour_tile(
     let m = multiplier as f64;
     let (bw, bh) = (buffered.width as i64, buffered.height as i64);
 
+    let pixel = |px: i64, py: i64| -> f64 {
+        let bx = (px + b).clamp(0, bw - 1) as u32;
+        let by = (py + b).clamp(0, bh - 1) as u32;
+        buffered.get(bx, by) as f64
+    };
+
+    // Grid corner (gx, gy) = average of the 4 pixel centers around it, scaled.
     let iso = isolines(
-        t,
-        t,
-        |x, y| {
-            let bx = (x + b).clamp(0, bw - 1) as u32;
-            let by = (y + b).clamp(0, bh - 1) as u32;
-            buffered.get(bx, by) as f64 * m
+        t + 1,
+        t + 1,
+        |gx, gy| {
+            let (mut sum, mut count) = (0.0, 0u32);
+            for (dx, dy) in [(-1, -1), (0, -1), (-1, 0), (0, 0)] {
+                let v = pixel(gx + dx, gy + dy);
+                if v.is_finite() {
+                    sum += v;
+                    count += 1;
+                }
+            }
+            if count == 0 {
+                f64::NAN
+            } else {
+                (sum / f64::from(count)) * m
+            }
         },
         interval as f64,
         extent as f64,
