@@ -39,7 +39,7 @@ Each pipeline stage is a single file (consolidated from the original
   geometry via geozero's `ToMvt`, serialized with prost.
 - `pipeline.rs` — `ContourTiler` resolves `source_zoom` + the active threshold
   rule, then samples → contours → encodes.
-- `ffi.rs` — uniffi bindings (`--features ffi`): host-implemented
+- `ffi.rs` — uniffi bindings: host-implemented
   `DemTileFetcher` (gets the resolved URL), `ContourTiler`, `default_config`,
   `parse_threshold_spec`. Usage docs live in the module's rustdoc.
 
@@ -54,17 +54,16 @@ overzoom-from-ancestor).
 
 ## Mobile bindings
 
-Implemented in `ffi.rs` behind the `ffi` feature (uniffi); usage examples live
-in that module's rustdoc. Key points:
+Implemented in `ffi.rs` (uniffi, always compiled — this crate is mobile-first);
+usage examples live in that module's rustdoc. Key points:
 
 - The surface is intentionally tiny: `config.dem_url_pattern` holds the DEM URL
   template, the host-implemented `DemTileFetcher` returns bytes for a resolved
   URL (so an HTTP interceptor still fires), and `ContourTiler::tile(z, x, y)`
   returns the MVT `Vec<u8>`. `ContourConfig`/`ThresholdRule`/`Encoding` cross as
   records/enums; `parse_threshold_spec` mirrors the `dem-contour://` query.
-- The `uniffi-bindgen` binary (built with `--features uniffi-cli`) generates the
-  Kotlin/Swift sources from the compiled library; the CLI deps are gated so a
-  plain `--features ffi` mobile build stays lean.
+- The `uniffi-bindgen` binary generates the Kotlin/Swift sources from the
+  compiled library (`uniffi` is a non-optional dep with the `cli` feature).
 - Packaging mirrors the proven `Mapeak-com/pmtiles-mobile` setup (`ci.yml`
   builds the Rust core, the Android AAR, and the iOS xcframework on every push):
   - **iOS / SwiftPM** — `scripts/build-xcframework.sh` builds the `.a` per Apple
@@ -73,11 +72,13 @@ in that module's rustdoc. Key points:
     `artifacts/MaplibreContourFFI.xcframework`. `Package.swift` is path-based on
     `main`; the release job pins it to the release `url`/`checksum` on the tag.
   - **Android / JitPack** — the self-contained `android/` Gradle project (module
-    `:contour`, committed wrapper) cross-compiles the `.so` per ABI via
-    `cargo-ndk` and generates the UniFFI Kotlin in the Gradle build. `jitpack.yml`
-    runs the same `:contour:publishToMavenLocal`. `.cargo/config.toml` forces
-    16 KB ELF alignment (Android 15+); the JNA `@aar` + disabled module metadata
-    avoid `UnsatisfiedLinkError`. `uniffi.toml` sets the Kotlin package.
+    `:contour`, committed wrapper) cross-compiles the `.so` per ABI via the
+    `net.mullvad.rust-android` plugin and generates the UniFFI Kotlin in the
+    Gradle build. The **release** workflow prebuilds the AAR and attaches it
+    (aar + pom + sources) to the GitHub Release; `jitpack.yml` just downloads
+    those and `mvn install`s them (no compile in JitPack). `.cargo/config.toml`
+    forces 16 KB ELF alignment (Android 15+); the JNA `@aar` + disabled module
+    metadata avoid `UnsatisfiedLinkError`. `uniffi.toml` sets the Kotlin package.
   - **Release** — `release.yml` is a manual `workflow_dispatch` (patch/minor/
     major); it computes the next version from git tags, `cargo set-version`s
     `Cargo.toml`, builds, pins `Package.swift`, and pushes the tag only.

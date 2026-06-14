@@ -21,12 +21,12 @@ TARGETS=(
 rustup target add "${TARGETS[@]}"
 
 for t in "${TARGETS[@]}"; do
-  ( cd "$ROOT" && cargo build --release --lib --features ffi --target "$t" )
+  ( cd "$ROOT" && cargo build --release --lib --target "$t" )
 done
 
 HEADERS="$BUILD/headers"
 rm -rf "$HEADERS"; mkdir -p "$HEADERS"
-( cd "$ROOT" && cargo run --quiet --features uniffi-cli --bin uniffi-bindgen -- generate \
+( cd "$ROOT" && cargo run --quiet --bin uniffi-bindgen -- generate \
     --library "target/aarch64-apple-ios/release/$LIB" \
     --language swift --out-dir "$BUILD/swift" --no-format )
 cp "$BUILD/swift/maplibre_contour_rs.swift" "$ROOT/Sources/MaplibreContour/maplibre_contour_rs.swift"

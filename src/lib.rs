@@ -27,7 +27,6 @@ pub mod pipeline;
 pub mod source;
 pub mod tile;
 
-#[cfg(feature = "ffi")]
 pub mod ffi;
 
 pub use config::{ContourConfig, Encoding};
@@ -35,5 +34,4 @@ pub use error::{Error, Result};
 pub use pipeline::ContourTiler;
 pub use tile::TileCoord;
 
-#[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();

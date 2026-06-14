@@ -33,25 +33,13 @@ geozero = { version = "0.15", default-features = false, features = [
 thiserror = "2"
 # LRU cache for decoded parent DEM tiles (mirrors maplibre-contour's cache).
 lru = "0.18"
+# Kotlin/Swift bindings + the `uniffi-bindgen` CLI. Always on: this crate is
+# built primarily to be embedded on mobile (mirrors Mapeak-com/pmtiles-mobile).
+uniffi = { version = "0.31", features = ["cli"] }
 
-# Optional: uniffi for Kotlin/Swift bindings. Enable with `--features ffi`.
-[dependencies.uniffi]
-version = "0.31"
-optional = true
-
-[features]
-default = []
-# Compiles the uniffi scaffolding for Kotlin + Swift bindings.
-ffi = ["dep:uniffi"]
-# Adds the bindgen CLI bits so `uniffi-bindgen` can emit Kotlin/Swift sources.
-# Kept separate so the shipped mobile library doesn't pull clap & friends.
-uniffi-cli = ["ffi", "uniffi/cli"]
-
-# Generates the Kotlin/Swift sources from the compiled library. Only built
-# when the CLI feature is on, so a plain `--features ffi` build stays lean.
+# Generates the Kotlin/Swift sources from the compiled library.
 [[bin]]
 name = "uniffi-bindgen"
-required-features = ["uniffi-cli"]
 
 [dev-dependencies]
 # Add criterion here when you start benchmarking the hot path.

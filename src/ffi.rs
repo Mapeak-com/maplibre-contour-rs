@@ -9,12 +9,11 @@
 //!
 //! # Generating the bindings
 //!
-//! Build the library, then run the bundled generator against it (the
-//! `uniffi-cli` feature pulls in the bindgen CLI):
+//! Build the library, then run the bundled generator against it:
 //!
 //! ```text
-//! cargo build --release --features ffi
-//! cargo run --features uniffi-cli --bin uniffi-bindgen -- generate \
+//! cargo build --release
+//! cargo run --bin uniffi-bindgen -- generate \
 //!     --library target/release/libmaplibre_contour_rs.<dylib|so> \
 //!     --language <kotlin|swift> --out-dir bindings
 //! ```

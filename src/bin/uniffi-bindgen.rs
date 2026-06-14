@@ -1,8 +1,8 @@
 //! Standalone binary that generates the Kotlin/Swift bindings from the
-//! compiled library. Build it with the `uniffi-cli` feature, then run e.g.:
+//! compiled library, e.g.:
 //!
 //! ```bash
-//! cargo run --features uniffi-cli --bin uniffi-bindgen -- \
+//! cargo run --bin uniffi-bindgen -- \
 //!     generate --library target/release/libmaplibre_contour_rs.dylib \
 //!     --language kotlin --out-dir bindings/kotlin
 //! ```

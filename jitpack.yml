@@ -1,15 +1,25 @@
+# The release workflow builds the AAR on a proper runner and attaches it (aar +
+# pom + sources) to the GitHub Release. Here we just download those prebuilt
+# assets and install them into the local Maven repo, which JitPack then serves
+# as com.github.<owner>.<repo>:contour:<tag>.
 jdk:
-  - openjdk17
-
-before_install:
-  # Install rustup, then add the Android targets (rustup-init's -t takes a single
-  # target, so the multi-target list must go through `rustup target add`).
-  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-  - export PATH="$HOME/.cargo/bin:$PATH" && rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-  - export PATH="$HOME/.cargo/bin:$PATH" && cargo install cargo-ndk --locked
-  # JitPack's bundled sdkmanager is broken under JDK 17 (javax.xml.bind removed),
-  # so install the NDK by direct download into the SDK's ndk/<version> dir.
-  - curl -sSL -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r28c-linux.zip && unzip -q /tmp/ndk.zip -d /tmp/ndkx && mkdir -p "${ANDROID_HOME:-/opt/android-sdk-linux}/ndk" && mv /tmp/ndkx/android-ndk-r28c "${ANDROID_HOME:-/opt/android-sdk-linux}/ndk/28.2.13676358"
+  - openjdk21
 
 install:
-  - export PATH="$HOME/.cargo/bin:$PATH" && cd android && ./gradlew :contour:publishToMavenLocal --no-daemon --stacktrace
+  # Wrapped in a subshell so our `set` flags don't leak into JitPack's own
+  # buildit.sh — a leaked `set -u` makes its later unset $AFTER_INSTALL_CMD
+  # reference abort the build with "unbound variable".
+  - |
+    (
+      set -eo pipefail
+      # JitPack provides these per-build: GROUP=com.github.<owner>, ARTIFACT=<repo>,
+      # VERSION=<tag>. The publication strips the leading v, so files are contour-<ver>.*.
+      OWNER="${GROUP#com.github.}"
+      VER="${VERSION#v}"
+      BASE="https://github.com/$OWNER/$ARTIFACT/releases/download/$VERSION"
+      curl -fsSL -o contour.aar "$BASE/contour-$VER.aar"
+      curl -fsSL -o contour.pom "$BASE/contour-$VER.pom"
+      curl -fsSL -o contour-sources.jar "$BASE/contour-$VER-sources.jar" || true
+      SRC=""; [ -s contour-sources.jar ] && SRC="-Dsources=contour-sources.jar"
+      mvn -q install:install-file -Dfile=contour.aar -DpomFile=contour.pom $SRC
+    )
