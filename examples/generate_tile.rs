@@ -11,9 +11,9 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use maplibre_contour_rs::config::ThresholdRule;
-use maplibre_contour_rs::source::MockTileSource;
+use maplibre_contour_rs::dem_source::MockTileSource;
 use maplibre_contour_rs::tile::Neighborhood;
-use maplibre_contour_rs::{ContourConfig, ContourTiler, Encoding, TileCoord};
+use maplibre_contour_rs::{ContourConfig, DemManager, Encoding, TileCoord};
 
 use image::{ImageFormat, Rgba, RgbaImage};
 
@@ -76,7 +76,7 @@ fn main() {
         ..Default::default()
     };
     let interval = config.thresholds_for(coord.z).unwrap().intervals[0];
-    let tiler = ContourTiler::new(hill_source(coord), config);
+    let tiler = DemManager::new(hill_source(coord), config);
 
     match tiler.tile(coord) {
         Ok(bytes) => {

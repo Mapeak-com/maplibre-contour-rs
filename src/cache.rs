@@ -6,13 +6,13 @@ use std::sync::{Arc, Mutex};
 
 use lru::LruCache;
 
-use crate::dem::DemGrid;
+use crate::decode_image::DemTile;
 use crate::tile::TileCoord;
 
 /// Thread-safe LRU cache of decoded elevation grids.
 #[derive(Clone)]
 pub struct DemCache {
-    inner: Arc<Mutex<LruCache<TileCoord, Arc<DemGrid>>>>,
+    inner: Arc<Mutex<LruCache<TileCoord, Arc<DemTile>>>>,
 }
 
 impl DemCache {
@@ -24,11 +24,11 @@ impl DemCache {
         }
     }
 
-    pub fn get(&self, coord: &TileCoord) -> Option<Arc<DemGrid>> {
+    pub fn get(&self, coord: &TileCoord) -> Option<Arc<DemTile>> {
         self.inner.lock().unwrap().get(coord).cloned()
     }
 
-    pub fn put(&self, coord: TileCoord, grid: Arc<DemGrid>) {
+    pub fn put(&self, coord: TileCoord, grid: Arc<DemTile>) {
         self.inner.lock().unwrap().put(coord, grid);
     }
 }

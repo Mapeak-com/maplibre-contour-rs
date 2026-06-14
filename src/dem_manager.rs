@@ -2,24 +2,23 @@
 
 use std::sync::Arc;
 
-use crate::buffer::sample_buffered;
 use crate::cache::DemCache;
 use crate::config::ContourConfig;
-use crate::contour::contour_tile;
-use crate::dem::{decode_tile, DemGrid};
+use crate::decode_image::{decode_tile, DemTile};
+use crate::dem_source::TileSource;
 use crate::error::Result;
-use crate::mvt::encode_mvt;
-use crate::source::TileSource;
+use crate::isolines::contour_tile;
 use crate::tile::TileCoord;
+use crate::vtpbf::encode_mvt;
 
 /// Owns the source, cache, and config; produces contour MVT tiles.
-pub struct ContourTiler<S: TileSource> {
+pub struct DemManager<S: TileSource> {
     source: S,
     cache: DemCache,
     config: ContourConfig,
 }
 
-impl<S: TileSource> ContourTiler<S> {
+impl<S: TileSource> DemManager<S> {
     pub fn new(source: S, config: ContourConfig) -> Self {
         Self {
             source,
@@ -38,7 +37,7 @@ impl<S: TileSource> ContourTiler<S> {
     }
 
     /// Fetch (or pull from cache) and decode a single DEM tile.
-    fn dem_tile(&self, coord: TileCoord) -> Result<Option<Arc<DemGrid>>> {
+    fn dem_tile(&self, coord: TileCoord) -> Result<Option<Arc<DemTile>>> {
         if let Some(grid) = self.cache.get(&coord) {
             return Ok(Some(grid));
         }
@@ -68,21 +67,18 @@ impl<S: TileSource> ContourTiler<S> {
         let Some(center_grid) = self.dem_tile(center)? else {
             return encode_mvt(&[], &self.config);
         };
-        let tile_size = center_grid.width;
-
-        let buffered =
-            sample_buffered(coord, source_zoom, tile_size, self.config.buffer_px, |c| {
-                self.dem_tile(c)
-            })?;
+        let source_width = center_grid.width;
 
         let contours = contour_tile(
-            &buffered,
-            tile_size,
-            self.config.buffer_px,
+            coord,
+            source_zoom,
+            source_width,
             rule,
             self.config.multiplier,
             self.config.extent,
-        );
+            self.config.buffer_px,
+            |c| self.dem_tile(c),
+        )?;
         encode_mvt(&contours, &self.config)
     }
 }

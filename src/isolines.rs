@@ -2,9 +2,17 @@
 //! `isolines.ts` (itself adapted from d3-contour).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::config::ThresholdRule;
-use crate::dem::DemGrid;
+use crate::decode_image::DemTile;
+use crate::error::Result;
+use crate::height_tile::HeightTile;
+use crate::tile::TileCoord;
+
+/// Overzoomed tiles are upsampled until the contour grid reaches at least this
+/// width, then averaged — maplibre-contour's `subsampleBelow` (default 100).
+const SUBSAMPLE_BELOW: i64 = 100;
 
 // Edge-midpoint encodings used by the marching-squares CASES table: a point
 // `[a, b]` sits on the left (a==0), right (a==2), top (b==0), or bottom edge.
@@ -222,11 +230,11 @@ fn isolines(
     segments
 }
 
-/// Trace contours over a materialized [`DemGrid`] (origin at its top-left,
+/// Trace contours over a materialized [`DemTile`] (origin at its top-left,
 /// edges clamped). The thin entry point used by the golden tests; the pipeline
 /// uses [`contour_tile`].
 pub fn generate_isolines(
-    grid: &DemGrid,
+    grid: &DemTile,
     interval: f32,
     extent: f64,
     buffer: u32,
@@ -252,50 +260,91 @@ pub struct Contour {
     pub lines: Vec<Vec<f64>>,
 }
 
-/// Trace the contours for `rule` over a buffered tile grid (as produced by
-/// [`crate::buffer::sample_buffered`]), scaling sampled elevations by
-/// `multiplier`. Coordinates come out in `0..extent` tile space (the center
-/// tile occupies the full range; the buffer margin lands just outside it).
+/// Trace the contours for `rule` over the tile at `coord`, reading the DEM at
+/// `source_zoom` (a coarser ancestor when overzooming) through `fetch`. Faithful
+/// to maplibre-contour's `fetchContourTile`:
 ///
-/// The buffered grid holds elevations at *pixel centers*; following
-/// maplibre-contour, each grid value fed to the tracer is the average of the
-/// four surrounding pixels (`averagePixelCentersToGrid`). That puts samples on
-/// pixel corners — a `(tile_size + 1)`-wide grid mapped with `extent/tile_size`
-/// units per pixel — which is what keeps contours aligned with the DEM (and
-/// lightly smooths them), instead of a half-pixel-shifted `extent/(tile_size-1)`.
+/// 1. crop the ancestor to this tile's area (`source_width >> dz` pixels);
+/// 2. upsample (bilinear, pixel-center aligned) until the grid is at least
+///    [`SUBSAMPLE_BELOW`] wide — so heavily-overzoomed tiles trace from a small,
+///    smooth grid rather than the full source resolution;
+/// 3. `averagePixelCentersToGrid` — each grid corner is the mean of its four
+///    neighbouring pixel centres (a `W+1`-wide grid mapped with `extent/W` units
+///    per pixel), which aligns contours with the DEM and lightly smooths them;
+/// 4. scale by `multiplier` and trace.
+///
+/// Coordinates come out in `0..extent` tile space; the `buffer` margin lands
+/// just outside. Returns an empty `Vec` when no DEM covers the tile.
+#[allow(clippy::too_many_arguments)]
 pub fn contour_tile(
-    buffered: &DemGrid,
-    tile_size: u32,
-    buffer: u32,
+    coord: TileCoord,
+    source_zoom: u8,
+    source_width: u32,
     rule: &ThresholdRule,
     multiplier: f32,
     extent: u32,
-) -> Vec<Contour> {
+    buffer: u32,
+    fetch: impl FnMut(TileCoord) -> Result<Option<Arc<DemTile>>>,
+) -> Result<Vec<Contour>> {
     let interval = rule.interval();
     if interval <= 0.0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let t = tile_size as i64;
-    let b = buffer as i64;
+
+    let dz = u32::from(coord.z - source_zoom);
+    let div = 1i64 << dz;
+    let sw = source_width as i64;
+    let crop_w = (sw >> dz).max(1); // ancestor pixels covering this tile
+
+    // Upsample factor so the contour grid is >= SUBSAMPLE_BELOW (maplibre).
+    let mut f = 1i64;
+    let mut w_out = crop_w;
+    while w_out < SUBSAMPLE_BELOW {
+        f *= 2;
+        w_out *= 2;
+    }
+    // `subsamplePixelCenters` sample offset (0 when no upsampling).
+    let sub = 0.5 - 1.0 / (2.0 * f as f64);
     let m = multiplier as f64;
-    let (bw, bh) = (buffered.width as i64, buffered.height as i64);
+    let b = buffer as i64;
 
-    let pixel = |px: i64, py: i64| -> f64 {
-        let bx = (px + b).clamp(0, bw - 1) as u32;
-        let by = (py + b).clamp(0, bh - 1) as u32;
-        buffered.get(bx, by) as f64
-    };
+    // Global source-pixel origin of this tile's cropped ancestor region.
+    let cx = coord.x as i64;
+    let cy = coord.y as i64;
+    let crop_ox = (cx >> dz) * sw + (cx & (div - 1)) * crop_w;
+    let crop_oy = (cy >> dz) * sw + (cy & (div - 1)) * crop_w;
+    // Upsampled grid pixel -> fractional global source pixel.
+    let gpx = |ox: i64| crop_ox as f64 + ox as f64 / f as f64 - sub;
+    let gpy = |oy: i64| crop_oy as f64 + oy as f64 / f as f64 - sub;
 
-    // Grid corner (gx, gy) = average of the 4 pixel centers around it, scaled.
+    // Source-pixel box we touch: the tracer reads grid corners `[-b, w_out+b]`,
+    // averaging reads upsampled px `[corner-1, corner]`, bilinear ±1 more.
+    let (lo, hi) = (-b - 1, w_out + b);
+    let field = HeightTile::fetch(
+        source_zoom,
+        source_width,
+        gpx(lo).floor() as i64 - 1,
+        gpx(hi).ceil() as i64 + 1,
+        gpy(lo).floor() as i64 - 1,
+        gpy(hi).ceil() as i64 + 1,
+        fetch,
+    )?;
+    let center = TileCoord::new(source_zoom, coord.x >> dz, coord.y >> dz);
+    if !field.has(center) {
+        return Ok(Vec::new());
+    }
+
+    // averagePixelCentersToGrid: corner (gx,gy) = mean of the 4 upsampled pixel
+    // centres around it, scaled by the elevation multiplier.
     let iso = isolines(
-        t + 1,
-        t + 1,
+        w_out + 1,
+        w_out + 1,
         |gx, gy| {
             let (mut sum, mut count) = (0.0, 0u32);
             for (dx, dy) in [(-1, -1), (0, -1), (-1, 0), (0, 0)] {
-                let v = pixel(gx + dx, gy + dy);
+                let v = field.sample(gpx(gx + dx), gpy(gy + dy));
                 if v.is_finite() {
-                    sum += v;
+                    sum += f64::from(v);
                     count += 1;
                 }
             }
@@ -310,7 +359,8 @@ pub fn contour_tile(
         b,
     );
 
-    iso.into_iter()
+    Ok(iso
+        .into_iter()
         .map(|(ele_key, lines)| {
             let elevation = ele_key as f32;
             Contour {
@@ -319,28 +369,38 @@ pub fn contour_tile(
                 lines,
             }
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn contour_tile_tags_major_levels_in_tile_space() {
-        // 4x4 grid, ramp 5/15/25/35 by row; tile_size 4, no buffer. Crossings
-        // land at 10/20/30, so 20 is the only major (multiple of 20).
-        let mut g = DemGrid::filled(4, 4, 0.0);
-        for y in 0..4 {
-            for x in 0..4 {
-                g.set(x, y, y as f32 * 10.0 + 5.0);
+    fn ramp_tile(size: u32) -> Arc<DemTile> {
+        // North-south ramp spanning 5..35 m, so contours land at 10/20/30.
+        let mut g = DemTile::filled(size, size, 0.0);
+        for y in 0..size {
+            let h = 5.0 + (y as f32 / (size - 1) as f32) * 30.0;
+            for x in 0..size {
+                g.set(x, y, h);
             }
         }
+        Arc::new(g)
+    }
+
+    #[test]
+    fn contour_tile_tags_major_levels_in_tile_space() {
+        // A single z0 tile (no overzoom); a north-south ramp crosses 10/20/30,
+        // so 20 (a multiple of the major interval) is the only major line.
+        let tile = ramp_tile(120); // >= SUBSAMPLE_BELOW so no upsampling
         let rule = ThresholdRule {
             zoom: 0,
             intervals: vec![10.0, 20.0],
         };
-        let contours = contour_tile(&g, 4, 0, &rule, 1.0, 4096);
+        let contours = contour_tile(TileCoord::new(0, 0, 0), 0, 120, &rule, 1.0, 4096, 0, |_| {
+            Ok(Some(tile.clone()))
+        })
+        .unwrap();
 
         let major: Vec<f32> = contours
             .iter()

@@ -7,31 +7,36 @@
 //!
 //! ## Pipeline
 //!
-//! Fetch + decode a DEM tile and its neighbors ([`source`], [`dem`]) → sample a
-//! buffered, optionally overzoomed elevation grid ([`buffer`]) → trace contours
-//! ([`contour`]) → encode to MVT ([`mvt`]). [`pipeline::ContourTiler`] ties
-//! these together over a [`cache`].
+//! Fetch + decode a DEM tile and its neighbors ([`dem_source`],
+//! [`decode_image`]) → sample a buffered, optionally overzoomed elevation grid
+//! ([`height_tile`]) → trace contours ([`isolines`]) → encode to MVT
+//! ([`vtpbf`]). [`dem_manager::DemManager`] ties these together over
+//! a [`cache`].
+//!
+//! Module names mirror their counterparts in maplibre-contour's TypeScript
+//! source (`height-tile.ts`, `isolines.ts`, `decode-image.ts`, `dem-source.ts`,
+//! `vtpbf.ts`, `local-dem-manager.ts`) so the two trees line up file-for-file.
 //!
 //! With the `ffi` feature, [`ffi`] exposes a uniffi interface (a host-provided
-//! [`ffi::DemTileFetcher`] + an [`ffi::ContourTiler`] object) for Kotlin/Swift;
+//! [`ffi::DemTileFetcher`] + an [`ffi::DemManager`] object) for Kotlin/Swift;
 //! see that module's docs for usage.
 
-pub mod buffer;
 pub mod cache;
 pub mod config;
-pub mod contour;
-pub mod dem;
+pub mod decode_image;
+pub mod dem_manager;
+pub mod dem_source;
 pub mod error;
-pub mod mvt;
-pub mod pipeline;
-pub mod source;
+pub mod height_tile;
+pub mod isolines;
 pub mod tile;
+pub mod vtpbf;
 
 pub mod ffi;
 
 pub use config::{ContourConfig, Encoding};
+pub use dem_manager::DemManager;
 pub use error::{Error, Result};
-pub use pipeline::ContourTiler;
 pub use tile::TileCoord;
 
 uniffi::setup_scaffolding!();

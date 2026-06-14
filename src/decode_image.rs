@@ -1,7 +1,7 @@
-//! DEM tiles: the in-memory elevation grid and PNG decoding.
+//! DEM tiles: the in-memory elevation grid and PNG/WebP decoding.
 //!
-//! A [`DemGrid`] is a row-major buffer of elevation samples in meters. A raw
-//! raster-DEM PNG (Mapbox Terrain-RGB or Terrarium) is turned into one by
+//! A [`DemTile`] is a row-major buffer of elevation samples in meters. A raw
+//! raster-DEM tile (Mapbox Terrain-RGB or Terrarium, PNG or WebP) is turned into one by
 //! [`decode_tile`], which maps every pixel through [`Encoding::decode`].
 
 use crate::config::Encoding;
@@ -9,14 +9,14 @@ use crate::error::{Error, Result};
 
 /// Decoded elevation values for a tile (or a buffered assembly of tiles).
 #[derive(Debug, Clone)]
-pub struct DemGrid {
+pub struct DemTile {
     pub width: u32,
     pub height: u32,
     /// `width * height` samples, row-major, in meters.
     pub data: Vec<f32>,
 }
 
-impl DemGrid {
+impl DemTile {
     pub fn new(width: u32, height: u32, data: Vec<f32>) -> Self {
         debug_assert_eq!(data.len() as u32, width * height);
         Self {
@@ -67,7 +67,7 @@ impl DemGrid {
 /// Decode raster-DEM `bytes` (PNG or WebP) into an elevation grid
 /// (RGBA8 → [`Encoding::decode`]), keeping the image's exact pixel dimensions.
 /// The format is detected from the bytes.
-pub fn decode_tile(bytes: &[u8], encoding: Encoding) -> Result<DemGrid> {
+pub fn decode_tile(bytes: &[u8], encoding: Encoding) -> Result<DemTile> {
     let img = image::load_from_memory(bytes)?.to_rgba8();
     let (width, height) = img.dimensions();
     if width == 0 || height == 0 {
@@ -80,7 +80,7 @@ pub fn decode_tile(bytes: &[u8], encoding: Encoding) -> Result<DemGrid> {
         data.push(encoding.decode(r, g, b));
     }
 
-    Ok(DemGrid::new(width, height, data))
+    Ok(DemTile::new(width, height, data))
 }
 
 #[cfg(test)]
@@ -110,10 +110,10 @@ mod tests {
 
     #[test]
     fn extent_ignores_nan() {
-        let mut g = DemGrid::filled(2, 2, f32::NAN);
+        let mut g = DemTile::filled(2, 2, f32::NAN);
         g.set(0, 0, 10.0);
         g.set(1, 1, 30.0);
         assert_eq!(g.extent(), Some((10.0, 30.0)));
-        assert_eq!(DemGrid::filled(2, 2, f32::NAN).extent(), None);
+        assert_eq!(DemTile::filled(2, 2, f32::NAN).extent(), None);
     }
 }

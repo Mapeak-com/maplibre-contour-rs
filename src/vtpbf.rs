@@ -1,6 +1,6 @@
 //! Serialize traced contours into a Mapbox Vector Tile.
 //!
-//! Contours arrive in `0..extent` tile coordinates (see [`crate::contour`]), so
+//! Contours arrive in `0..extent` tile coordinates (see [`crate::isolines`]), so
 //! this just builds one line feature per contour — carrying `ele` and `level`
 //! attributes — and writes a single layer. geozero's [`ToMvt`] does the
 //! command-stream encoding; we assemble the layer and key/value tables.
@@ -10,8 +10,8 @@ use geozero::mvt::{tile, Message, Tile};
 use geozero::ToMvt;
 
 use crate::config::ContourConfig;
-use crate::contour::Contour;
 use crate::error::{Error, Result};
+use crate::isolines::Contour;
 
 /// Encode `contours` into MVT bytes for one tile.
 pub fn encode_mvt(contours: &[Contour], config: &ContourConfig) -> Result<Vec<u8>> {

@@ -36,7 +36,7 @@ config.demMaxZoom = 11
 config.overzoom = 1
 config.thresholds = parseThresholdSpec("11*200*1000~12*10*100~13*10*100")
 
-let tiler = ContourTiler(fetcher: HttpDemFetcher(), config: config)
+let tiler = DemManager(fetcher: HttpDemFetcher(), config: config)
 let mvt: Data = try tiler.tile(z: 14, x: 9000, y: 6000)
 ```
 
@@ -67,7 +67,7 @@ val config = defaultConfig().copy(
     thresholds = parseThresholdSpec("11*200*1000~12*10*100~13*10*100"),
 )
 
-val tiler = ContourTiler(HttpDemFetcher(client), config)
+val tiler = DemManager(HttpDemFetcher(client), config)
 val mvt: ByteArray = tiler.tile(14u, 9000u, 6000u)
 ```
 
@@ -75,7 +75,7 @@ Serve the returned MVT bytes to MapLibre through your map's tile provider (a
 custom protocol / request interceptor that calls `tiler.tile(z, x, y)`), then
 add a `vector` source + line layers styled on the `ele`/`level` attributes.
 
-`ContourTiler` is thread-safe — build one and call `tile` off the main thread.
+`DemManager` is thread-safe — build one and call `tile` off the main thread.
 
 ## Configuration
 
@@ -94,7 +94,7 @@ need:
 ## Use from Rust
 
 For server-side or other non-mobile use, depend on it straight from GitHub
-(no registry needed) and implement [`TileSource`](src/source.rs):
+(no registry needed) and implement [`TileSource`](src/dem_source.rs):
 
 ```toml
 [dependencies]
@@ -102,11 +102,11 @@ maplibre-contour-rs = { git = "https://github.com/mapeak-com/maplibre-contour-rs
 ```
 
 ```rust,no_run
-use maplibre_contour_rs::{ContourConfig, ContourTiler, TileCoord};
-use maplibre_contour_rs::source::MockTileSource;
+use maplibre_contour_rs::{ContourConfig, DemManager, TileCoord};
+use maplibre_contour_rs::dem_source::MockTileSource;
 
 let source = MockTileSource::default(); // your TileSource here
-let tiler = ContourTiler::new(source, ContourConfig::default());
+let tiler = DemManager::new(source, ContourConfig::default());
 let mvt: Vec<u8> = tiler.tile(TileCoord::new(12, 2048, 1361))?;
 # Ok::<(), maplibre_contour_rs::Error>(())
 ```
@@ -120,16 +120,21 @@ TileCoord ──▶ fetch 3x3 neighborhood ──▶ decode DEM ──▶ assemb
           ──▶ one-pass marching-squares contours ──▶ encode MVT ──▶ bytes
 ```
 
+Module filenames mirror [maplibre-contour](https://github.com/onthegomap/maplibre-contour)'s
+TypeScript source (`height-tile.ts` → `height_tile.rs`, `isolines.ts` →
+`isolines.rs`, `decode-image.ts` → `decode_image.rs`, etc.) so the two trees
+line up file-for-file.
+
 | Stage | Module | Crate |
 |------|--------|-------|
-| Tile / neighbor math, URL templates | [`tile`](src/tile.rs), [`source`](src/source.rs) | — |
-| Decode DEM PNG + elevation grid | [`dem`](src/dem.rs) | `image` |
-| Buffered + overzoomed sampling | [`buffer`](src/buffer.rs) | — |
+| Tile / neighbor math, URL templates | [`tile`](src/tile.rs), [`dem_source`](src/dem_source.rs) | — |
+| Decode DEM PNG/WebP + elevation grid | [`decode_image`](src/decode_image.rs) | `image` |
+| Buffered + overzoomed sampling | [`height_tile`](src/height_tile.rs) | — |
 | Decoded-tile cache | [`cache`](src/cache.rs) | `lru` |
 | Per-zoom thresholds / config | [`config`](src/config.rs) | — |
-| Contour tracing (one-pass) | [`contour`](src/contour.rs) | — |
-| MVT encoding | [`mvt`](src/mvt.rs) | `geozero` |
-| Orchestration | [`pipeline`](src/pipeline.rs) | — |
+| Contour tracing (one-pass) | [`isolines`](src/isolines.rs) | — |
+| MVT encoding | [`vtpbf`](src/vtpbf.rs) | `geozero` |
+| Orchestration | [`dem_manager`](src/dem_manager.rs) | — |
 | Mobile bindings | [`ffi`](src/ffi.rs) | `uniffi` |
 
 The contour engine is a one-pass port of maplibre-contour's `isolines.ts` (a
