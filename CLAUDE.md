@@ -88,6 +88,11 @@ usage examples live in that module's rustdoc. Key points:
     `Sources/MaplibreContour/maplibre_contour_rs.swift`, and assembles
     `artifacts/MaplibreContourFFI.xcframework`. `Package.swift` is path-based on
     `main`; the release job pins it to the release `url`/`checksum` on the tag.
+    The xcframework's headers are nested under `Headers/maplibre_contour_rsFFI/`
+    (modulemap + `.h`), **not** the `Headers/` root — Clang finds the module via
+    `<Headers>/<module>/module.modulemap`, and the unique path avoids the
+    `module.modulemap` collision when another uniffi xcframework (e.g.
+    pmtiles-mobile) is linked into the same app. Don't flatten it back.
   - **Android / JitPack** — the self-contained `android/` Gradle project (module
     `:contour`, committed wrapper) cross-compiles the `.so` per ABI via the
     `net.mullvad.rust-android` plugin and generates the UniFFI Kotlin in the

@@ -9,6 +9,7 @@ BUILD="$ROOT/build/apple"
 ARTIFACTS="$ROOT/artifacts"
 LIB="libmaplibre_contour_rs.a"
 FRAMEWORK="MaplibreContourFFI"
+FFI_MODULE="maplibre_contour_rsFFI"
 
 TARGETS=(
   aarch64-apple-ios
@@ -25,13 +26,13 @@ for t in "${TARGETS[@]}"; do
 done
 
 HEADERS="$BUILD/headers"
-rm -rf "$HEADERS"; mkdir -p "$HEADERS"
+rm -rf "$HEADERS"; mkdir -p "$HEADERS/$FFI_MODULE"
 ( cd "$ROOT" && cargo run --quiet --bin uniffi-bindgen -- generate \
     --library "target/aarch64-apple-ios/release/$LIB" \
     --language swift --out-dir "$BUILD/swift" --no-format )
 cp "$BUILD/swift/maplibre_contour_rs.swift" "$ROOT/Sources/MaplibreContour/maplibre_contour_rs.swift"
-cp "$BUILD/swift/maplibre_contour_rsFFI.h" "$HEADERS/"
-cp "$BUILD/swift/maplibre_contour_rsFFI.modulemap" "$HEADERS/module.modulemap"
+cp "$BUILD/swift/maplibre_contour_rsFFI.h" "$HEADERS/$FFI_MODULE/"
+cp "$BUILD/swift/maplibre_contour_rsFFI.modulemap" "$HEADERS/$FFI_MODULE/module.modulemap"
 
 mkdir -p "$BUILD/ios-sim" "$BUILD/macos"
 lipo -create \
