@@ -535,7 +535,7 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 /**
  * A contour tiler usable from Kotlin/Swift. Thread-safe; share one instance.
  */
-public protocol ContourTilerProtocol: AnyObject, Sendable {
+public protocol DemManagerProtocol: AnyObject, Sendable {
     
     /**
      * Generate the contour MVT for tile `z/x/y`.
@@ -546,7 +546,7 @@ public protocol ContourTilerProtocol: AnyObject, Sendable {
 /**
  * A contour tiler usable from Kotlin/Swift. Thread-safe; share one instance.
  */
-open class ContourTiler: ContourTilerProtocol, @unchecked Sendable {
+open class DemManager: DemManagerProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
 
     /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
@@ -583,7 +583,7 @@ open class ContourTiler: ContourTilerProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_maplibre_contour_rs_fn_clone_contourtiler(self.handle, $0) }
+        return try! rustCall { uniffi_maplibre_contour_rs_fn_clone_demmanager(self.handle, $0) }
     }
     /**
      * Build a tiler from a fetcher and configuration. The DEM URL pattern is
@@ -592,7 +592,7 @@ open class ContourTiler: ContourTilerProtocol, @unchecked Sendable {
 public convenience init(fetcher: DemTileFetcher, config: ContourConfig) {
     let handle =
         try! rustCall() {
-    uniffi_maplibre_contour_rs_fn_constructor_contourtiler_new(
+    uniffi_maplibre_contour_rs_fn_constructor_demmanager_new(
         FfiConverterTypeDemTileFetcher_lower(fetcher),
         FfiConverterTypeContourConfig_lower(config),$0
     )
@@ -606,7 +606,7 @@ public convenience init(fetcher: DemTileFetcher, config: ContourConfig) {
             return
         }
 
-        try! rustCall { uniffi_maplibre_contour_rs_fn_free_contourtiler(handle, $0) }
+        try! rustCall { uniffi_maplibre_contour_rs_fn_free_demmanager(handle, $0) }
     }
 
     
@@ -617,7 +617,7 @@ public convenience init(fetcher: DemTileFetcher, config: ContourConfig) {
      */
 open func tile(z: UInt8, x: UInt32, y: UInt32)throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
-    uniffi_maplibre_contour_rs_fn_method_contourtiler_tile(
+    uniffi_maplibre_contour_rs_fn_method_demmanager_tile(
             self.uniffiCloneHandle(),
         FfiConverterUInt8.lower(z),
         FfiConverterUInt32.lower(x),
@@ -634,24 +634,24 @@ open func tile(z: UInt8, x: UInt32, y: UInt32)throws  -> Data  {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeContourTiler: FfiConverter {
+public struct FfiConverterTypeDemManager: FfiConverter {
     typealias FfiType = UInt64
-    typealias SwiftType = ContourTiler
+    typealias SwiftType = DemManager
 
-    public static func lift(_ handle: UInt64) throws -> ContourTiler {
-        return ContourTiler(unsafeFromHandle: handle)
+    public static func lift(_ handle: UInt64) throws -> DemManager {
+        return DemManager(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: ContourTiler) -> UInt64 {
+    public static func lower(_ value: DemManager) -> UInt64 {
         return value.uniffiCloneHandle()
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ContourTiler {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DemManager {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    public static func write(_ value: ContourTiler, into buf: inout [UInt8]) {
+    public static func write(_ value: DemManager, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -660,15 +660,15 @@ public struct FfiConverterTypeContourTiler: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeContourTiler_lift(_ handle: UInt64) throws -> ContourTiler {
-    return try FfiConverterTypeContourTiler.lift(handle)
+public func FfiConverterTypeDemManager_lift(_ handle: UInt64) throws -> DemManager {
+    return try FfiConverterTypeDemManager.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeContourTiler_lower(_ value: ContourTiler) -> UInt64 {
-    return FfiConverterTypeContourTiler.lower(value)
+public func FfiConverterTypeDemManager_lower(_ value: DemManager) -> UInt64 {
+    return FfiConverterTypeDemManager.lower(value)
 }
 
 
@@ -1394,13 +1394,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_maplibre_contour_rs_checksum_func_parse_threshold_spec() != 26605) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_method_contourtiler_tile() != 6864) {
+    if (uniffi_maplibre_contour_rs_checksum_method_demmanager_tile() != 46886) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_maplibre_contour_rs_checksum_method_demtilefetcher_fetch() != 9923) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_constructor_contourtiler_new() != 50620) {
+    if (uniffi_maplibre_contour_rs_checksum_constructor_demmanager_new() != 10497) {
         return InitializationResult.apiChecksumMismatch
     }
 

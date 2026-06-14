@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use maplibre_contour_rs::config::ThresholdRule;
-use maplibre_contour_rs::source::MockTileSource;
+use maplibre_contour_rs::dem_source::MockTileSource;
 use maplibre_contour_rs::tile::{Neighborhood, TileCoord};
-use maplibre_contour_rs::{ContourConfig, ContourTiler};
+use maplibre_contour_rs::{ContourConfig, DemManager};
 
 use geozero::mvt::{Message, Tile};
 use image::{ImageFormat, Rgba, RgbaImage};
@@ -67,11 +67,12 @@ fn neighborhood_has_nine_or_fewer_coords() {
 
 #[test]
 fn generates_nonempty_mvt_for_a_sloped_field() {
-    // A diagonal ramp guarantees plenty of contour crossings.
+    // A diagonal ramp guarantees plenty of contour crossings. Small tile coords
+    // keep elevations in the valid range (maplibre nan-clips outside ±[-12k,9k]).
     let height = |gx: f64, gy: f64| (gx + gy) as f32;
 
     let z = 8;
-    let center = TileCoord::new(z, 128, 128);
+    let center = TileCoord::new(z, 1, 1);
     let hood = Neighborhood::around(center);
 
     let mut tiles = HashMap::new();
@@ -80,7 +81,7 @@ fn generates_nonempty_mvt_for_a_sloped_field() {
     }
     let source = MockTileSource { tiles };
 
-    let tiler = ContourTiler::new(source, config());
+    let tiler = DemManager::new(source, config());
     let bytes = tiler.tile(center).unwrap();
 
     let tile = Tile::decode(&bytes[..]).unwrap();
@@ -112,7 +113,7 @@ fn contours_are_continuous_across_a_seam() {
         }
     }
     let source = MockTileSource { tiles };
-    let tiler = ContourTiler::new(source, config());
+    let tiler = DemManager::new(source, config());
 
     let left_tile = Tile::decode(&tiler.tile(left).unwrap()[..]).unwrap();
     let right_tile = Tile::decode(&tiler.tile(right).unwrap()[..]).unwrap();
@@ -138,7 +139,7 @@ fn overzooms_above_dem_max_zoom() {
     let height = |gx: f64, gy: f64| (gx + gy) as f32;
 
     let dem_z = 10u8;
-    let req = TileCoord::new(13, 803, 805); // ancestor at z10 is (100, 100)
+    let req = TileCoord::new(13, 8, 8); // ancestor at z10 is (1, 1); small -> valid elevations
     let ancestor = TileCoord::new(dem_z, req.x >> 3, req.y >> 3);
 
     // Provide the z10 DEM around the ancestor; nothing at z11+.
@@ -159,7 +160,7 @@ fn overzooms_above_dem_max_zoom() {
         }],
         ..Default::default()
     };
-    let tiler = ContourTiler::new(source, cfg);
+    let tiler = DemManager::new(source, cfg);
 
     let tile = Tile::decode(&tiler.tile(req).unwrap()[..]).unwrap();
     assert_eq!(tile.layers[0].name, "contours");

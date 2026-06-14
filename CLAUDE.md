@@ -15,32 +15,49 @@ how something should behave, check that repo first.
 
 ## Architecture (where things live)
 
-Each pipeline stage is a single file (consolidated from the original
-`tile/`, `dem/`, `contour/`, `mvt/` directories). All stages below are
-**implemented and tested**.
+Each pipeline stage is a single file. **Filenames mirror maplibre-contour's
+TypeScript source** so the two trees line up file-for-file; the table below is
+the map. All stages are **implemented and tested**.
+
+| maplibre-contour (TS) | this repo | main type / fn |
+| --- | --- | --- |
+| `height-tile.ts` | `height_tile.rs` | `HeightTile` |
+| `isolines.ts` | `isolines.rs` | `generate_isolines` + `contour_tile` |
+| `decode-image.ts` | `decode_image.rs` | `DemTile`, `decode_tile` |
+| `cache.ts` | `cache.rs` | `DemCache` |
+| `local-dem-manager.ts` | `dem_manager.rs` | `DemManager` |
+| `dem-source.ts` | `dem_source.rs` | `TileSource`, `UrlTemplate` |
+| `vtpbf.ts` | `vtpbf.rs` | `encode_mvt` |
+| `config.ts`+`types.ts`+`utils.ts` | `config.rs` | `Encoding`/`ThresholdRule`/`ContourConfig` |
+| — | `tile.rs` | `TileCoord`, `Neighborhood` |
+| — | `error.rs`, `ffi.rs`, `lib.rs` | (no TS analog) |
 
 - `config.rs` — `Encoding`, `ContourConfig`, and per-zoom `ThresholdRule`
   (`intervals[0]` = minor; coarser entries tag higher `level`). Also
   `parse_thresholds` (`"11*200*1000~…"`), `thresholds_for(z)`, `source_zoom(z)`.
 - `tile.rs` — `TileCoord` (XYZ, x-wrap / y-clamp) and `Neighborhood` (3x3).
-- `dem.rs` — `DemGrid` (elevation buffer) and `decode_tile` (PNG → RGBA8 → grid).
-- `buffer.rs` — `sample_buffered`: bilinear sample of the DEM at `source_zoom`
-  over the tile + margin. One path covers both seam-buffering and **overzoom**
-  (sampling a coarser ancestor when `z > dem_max_zoom`), like maplibre-contour's
-  `fetchDem` + `combineNeighbors` + subsample.
+- `decode_image.rs` — `DemTile` (elevation buffer) and `decode_tile`
+  (PNG/WebP → RGBA8 → grid).
+- `height_tile.rs` — `HeightTile`: a window of decoded DEM tiles at `source_zoom`,
+  sampled by global source-pixel coordinate with x-wrap, y-clamp, NaN-aware
+  bilinear interpolation, and the valid-elevation range clip (±[-12k,9k]).
+  `contour_tile` drives it for both seam-buffering and **overzoom** (sampling a
+  coarser ancestor when `z > dem_max_zoom`), like maplibre-contour's `fetchDem`
+  + `combineNeighbors` + `subsamplePixelCenters`.
 - `cache.rs` — `DemCache`, LRU of decoded tiles.
-- `source.rs` — `TileSource` trait, `MockTileSource`, and `UrlTemplate`
+- `dem_source.rs` — `TileSource` trait, `MockTileSource`, and `UrlTemplate`
   (`{z}/{x}/{y}`, `{-y}`).
-- `contour.rs` — one-pass marching squares ported from maplibre-contour's
+- `isolines.rs` — one-pass marching squares ported from maplibre-contour's
   `isolines.ts` (no external deps): `generate_isolines` (the engine, covered by
   `tests/isolines.rs`) + `contour_tile` (samples the buffered grid, scales by
   `multiplier`, tags major/minor `level`).
-- `mvt.rs` — `encode_mvt`: grid px → extent space, one layer with `ele`/`level`,
+- `vtpbf.rs` — `encode_mvt`: grid px → extent space, one layer with `ele`/`level`,
   geometry via geozero's `ToMvt`, serialized with prost.
-- `pipeline.rs` — `ContourTiler` resolves `source_zoom` + the active threshold
-  rule, then samples → contours → encodes.
-- `ffi.rs` — uniffi bindings: host-implemented
-  `DemTileFetcher` (gets the resolved URL), `ContourTiler`, `default_config`,
+- `dem_manager.rs` — `DemManager` resolves `source_zoom` + the active
+  threshold rule, then samples → contours → encodes.
+- `ffi.rs` — uniffi bindings: host-implemented `DemTileFetcher` (gets the
+  resolved URL) and the mobile-facing `DemManager` uniffi object (a thin wrapper
+  over the core `dem_manager::DemManager`), plus `default_config` and
   `parse_threshold_spec`. Usage docs live in the module's rustdoc.
 
 Tests: per-module unit tests plus `tests/pipeline.rs` (seam continuity +
@@ -59,7 +76,7 @@ usage examples live in that module's rustdoc. Key points:
 
 - The surface is intentionally tiny: `config.dem_url_pattern` holds the DEM URL
   template, the host-implemented `DemTileFetcher` returns bytes for a resolved
-  URL (so an HTTP interceptor still fires), and `ContourTiler::tile(z, x, y)`
+  URL (so an HTTP interceptor still fires), and `DemManager::tile(z, x, y)`
   returns the MVT `Vec<u8>`. `ContourConfig`/`ThresholdRule`/`Encoding` cross as
   records/enums; `parse_threshold_spec` mirrors the `dem-contour://` query.
 - The `uniffi-bindgen` binary generates the Kotlin/Swift sources from the

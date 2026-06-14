@@ -6,8 +6,8 @@
 
 use std::collections::BTreeMap;
 
-use maplibre_contour_rs::contour::generate_isolines;
-use maplibre_contour_rs::dem::DemGrid;
+use maplibre_contour_rs::decode_image::DemTile;
+use maplibre_contour_rs::isolines::generate_isolines;
 
 const EXTENT: f64 = 4096.0;
 
@@ -17,14 +17,14 @@ fn round3(n: f64) -> f64 {
     (n * 1000.0 + 0.001).round() / 1000.0
 }
 
-fn grid(rows: &[&[f32]]) -> DemGrid {
+fn grid(rows: &[&[f32]]) -> DemTile {
     let h = rows.len() as u32;
     let w = rows[0].len() as u32;
     let mut data = Vec::with_capacity((w * h) as usize);
     for r in rows {
         data.extend_from_slice(r);
     }
-    DemGrid::new(w, h, data)
+    DemTile::new(w, h, data)
 }
 
 fn rotate(p: (f64, f64), a: (f64, f64), angle: i32) -> (f64, f64) {
@@ -38,7 +38,7 @@ fn rotate(p: (f64, f64), a: (f64, f64), angle: i32) -> (f64, f64) {
 }
 
 /// Sample `base` through a rotation about its center (mirrors the TS harness).
-fn rotated_grid(base: &DemGrid, rotation: i32) -> DemGrid {
+fn rotated_grid(base: &DemTile, rotation: i32) -> DemTile {
     let size = base.width as i32;
     let c = (f64::from(size) - 1.0) / 2.0;
     let mut data = vec![0f32; (size * size) as usize];
@@ -48,12 +48,12 @@ fn rotated_grid(base: &DemGrid, rotation: i32) -> DemGrid {
             data[(y * size + x) as usize] = base.get(nx.round() as u32, ny.round() as u32);
         }
     }
-    DemGrid::new(size as u32, size as u32, data)
+    DemTile::new(size as u32, size as u32, data)
 }
 
 /// Run `generate_isolines` on `base` rotated by `rotation`, then rotate the
 /// result back into the base grid's coordinate frame.
-fn run(base: &DemGrid, interval: f32, rotation: i32) -> Lines {
+fn run(base: &DemTile, interval: f32, rotation: i32) -> Lines {
     let g = rotated_grid(base, rotation);
     let size = f64::from(base.width);
     let c = (size - 1.0) / 2.0;
@@ -88,7 +88,7 @@ fn expected(pairs: &[(i64, &[&[f64]])]) -> Lines {
 }
 
 /// Assert a case for the given rotations (0 only, or all four).
-fn check(name: &str, interval: f32, g: &DemGrid, exp: &[(i64, &[&[f64]])], rotations: &[i32]) {
+fn check(name: &str, interval: f32, g: &DemTile, exp: &[(i64, &[&[f64]])], rotations: &[i32]) {
     let want = expected(exp);
     for &rot in rotations {
         let got = run(g, interval, rot);

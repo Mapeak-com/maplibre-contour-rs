@@ -71,7 +71,7 @@ impl Neighborhood {
     }
 
     /// All distinct, existing coordinates in this neighborhood (including
-    /// center). Handy for prefetching from the [`crate::source::TileSource`].
+    /// center). Handy for prefetching from the [`crate::dem_source::TileSource`].
     pub fn coords(&self) -> Vec<TileCoord> {
         let mut out = Vec::with_capacity(9);
         for row in &self.tiles {

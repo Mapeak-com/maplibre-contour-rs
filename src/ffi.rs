@@ -2,7 +2,7 @@
 //!
 //! Mirrors maplibre-contour: put the DEM URL pattern and contour options in
 //! [`ContourConfig`], implement [`DemTileFetcher`] to return the bytes for a
-//! resolved tile URL, and call [`ContourTiler::tile`] for the MVT bytes. The
+//! resolved tile URL, and call [`DemManager::tile`] for the MVT bytes. The
 //! library only ever hands you the resolved URL, so fetching it with your own
 //! HTTP stack lets any interceptor or cache apply. Contours above
 //! `dem_max_zoom` are overzoomed from the ancestor DEM automatically.
@@ -39,7 +39,7 @@
 //!     overzoom = 1u,
 //!     thresholds = parseThresholdSpec("11*200*1000~12*10*100~13*10*100"),
 //! )
-//! val tiler = ContourTiler(HttpDemFetcher(client), config)
+//! val tiler = DemManager(HttpDemFetcher(client), config)
 //! val mvt: ByteArray = tiler.tile(14u, 9000u, 6000u)
 //! ```
 //!
@@ -58,14 +58,14 @@
 //! config.demMaxZoom = 11
 //! config.overzoom = 1
 //! config.thresholds = parseThresholdSpec("11*200*1000~12*10*100")
-//! let tiler = ContourTiler(fetcher: HttpDemFetcher(), config: config)
+//! let tiler = DemManager(fetcher: HttpDemFetcher(), config: config)
 //! let mvt = try tiler.tile(z: 14, x: 9000, y: 6000)
 //! ```
 
 use std::sync::Arc;
 
 use crate::config::{parse_thresholds, ContourConfig, ThresholdRule};
-use crate::source::{TileSource, UrlTemplate};
+use crate::dem_source::{TileSource, UrlTemplate};
 use crate::tile::TileCoord;
 
 /// Error surfaced across the FFI boundary (flattened to its message).
@@ -107,12 +107,12 @@ impl TileSource for UrlSource {
 
 /// A contour tiler usable from Kotlin/Swift. Thread-safe; share one instance.
 #[derive(uniffi::Object)]
-pub struct ContourTiler {
-    inner: crate::pipeline::ContourTiler<UrlSource>,
+pub struct DemManager {
+    inner: crate::dem_manager::DemManager<UrlSource>,
 }
 
 #[uniffi::export]
-impl ContourTiler {
+impl DemManager {
     /// Build a tiler from a fetcher and configuration. The DEM URL pattern is
     /// taken from `config.dem_url_pattern`.
     #[uniffi::constructor]
@@ -122,7 +122,7 @@ impl ContourTiler {
             template: UrlTemplate::new(config.dem_url_pattern.clone()),
         };
         Arc::new(Self {
-            inner: crate::pipeline::ContourTiler::new(source, config),
+            inner: crate::dem_manager::DemManager::new(source, config),
         })
     }
 
