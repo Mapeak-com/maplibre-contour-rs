@@ -4,8 +4,7 @@
 //! per-zoom `thresholds`, `multiplier`, and `overzoom` behavior.
 
 /// How elevation (meters) is packed into the RGB channels of a DEM tile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum Encoding {
     /// Mapbox Terrain-RGB: `height = -10000 + (R*65536 + G*256 + B) * 0.1`.
     Mapbox,
@@ -32,8 +31,7 @@ impl Encoding {
 /// a higher `level`: a line's level is the largest index `i` for which its
 /// elevation is a multiple of `intervals[i]`. So `[200, 1000]` traces every
 /// 200 m and marks every 1000 m as major (`level = 1`).
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct ThresholdRule {
     /// Lowest zoom this rule applies to (used by [`ContourConfig::thresholds_for`]).
     pub zoom: u8,
@@ -82,8 +80,7 @@ pub fn parse_thresholds(spec: &str) -> Vec<ThresholdRule> {
 }
 
 /// Everything needed to turn DEM tiles into contour MVT tiles.
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct ContourConfig {
     /// DEM pixel encoding.
     pub encoding: Encoding,

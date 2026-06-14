@@ -27,7 +27,7 @@ TileCoord ──▶ fetch 3x3 neighborhood ──▶ decode DEM ──▶ assemb
 | Contour tracing (one-pass) | [`contour`](src/contour.rs) | — |
 | MVT encoding | [`mvt`](src/mvt.rs) | `geozero` |
 | Orchestration | [`pipeline`](src/pipeline.rs) | — |
-| Mobile bindings | [`ffi`](src/ffi.rs) (`--features ffi`) | `uniffi` |
+| Mobile bindings | [`ffi`](src/ffi.rs) | `uniffi` |
 
 Parity with maplibre-contour: a `{z}/{x}/{y}` DEM URL pattern, per-zoom
 `thresholds` (`[minor, major]` spacings, parseable from `"11*200*1000~…"`), an
@@ -79,9 +79,8 @@ maplibre-contour-rs = { git = "https://github.com/mapeak-com/maplibre-contour-rs
 ## Mobile (Android & iOS)
 
 The crate exposes a [uniffi](https://mozilla.github.io/uniffi-rs/) interface
-behind the `ffi` feature (see the `ffi` module docs for the Kotlin/Swift API).
-Each release publishes consumable packages — no Maven/CocoaPods/crates.io
-needed.
+(see the `ffi` module docs for the Kotlin/Swift API). Each release publishes
+consumable packages — no Maven/CocoaPods/crates.io needed.
 
 ### iOS — Swift Package Manager
 
@@ -106,9 +105,11 @@ dependencies {
 }
 ```
 
-JitPack builds [`android/`](android/contour/build.gradle.kts) from the tag,
-cross-compiling the Rust `.so` per ABI with `cargo-ndk` and generating the
-UniFFI Kotlin bindings during the Gradle build (JNA comes transitively).
+The AAR is prebuilt by the release workflow and attached to the tag's GitHub
+Release; JitPack just downloads and serves it (no compile). JNA comes
+transitively. The Gradle build ([`android/`](android/contour/build.gradle.kts))
+cross-compiles the Rust `.so` per ABI via the `net.mullvad.rust-android` plugin
+and generates the UniFFI Kotlin bindings.
 
 ### How releases are produced
 

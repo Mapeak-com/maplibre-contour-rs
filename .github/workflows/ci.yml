@@ -26,11 +26,11 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
       - name: Test
-        run: cargo test --all-features
+        run: cargo test
       - name: Docs
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -42,18 +42,15 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-ndk
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
       - name: Install NDK
         run: sdkmanager --install "ndk;28.2.13676358"
-      - name: Publish to Maven local (same command JitPack runs)
+      - name: Publish to Maven local
         working-directory: android
         run: ./gradlew :contour:publishToMavenLocal --no-daemon --stacktrace
       - uses: actions/upload-artifact@v7

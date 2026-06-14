@@ -1,16 +1,22 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.tasks.InputDirectory
+import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
+import org.gradle.process.ExecOperations
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import javax.inject.Inject
 
 plugins {
     id("com.android.library")
-    id("org.jetbrains.kotlin.android")
+    id("net.mullvad.rust-android") version "0.10.1"
     id("maven-publish")
 }
 
 val ndkVer = "28.2.13676358"
-val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
-// The Rust crate lives at the repo root (two levels up from this module).
-val coreDir = file("../..")
-val libName = "libmaplibre_contour_rs.so"
 
 android {
     namespace = "com.mapeak.maplibrecontour"
@@ -25,58 +31,72 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
-    // Rust .so files (built by :cargoNdkBuild) + generated UniFFI Kotlin.
-    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("jniLibs"))
-    sourceSets["main"].java.srcDir(layout.buildDirectory.dir("generated/uniffi"))
 
     publishing {
         singleVariant("release") { withSourcesJar() }
     }
 }
 
-val jniLibsDir = layout.buildDirectory.dir("jniLibs")
-
-// Cross-compile the Rust core into libmaplibre_contour_rs.so per ABI via cargo-ndk.
-val cargoNdkBuild = tasks.register<Exec>("cargoNdkBuild") {
-    workingDir = coreDir
-    environment("ANDROID_NDK_HOME", android.sdkDirectory.resolve("ndk/$ndkVer").absolutePath)
-    val cargoArgs = mutableListOf("ndk", "-o", jniLibsDir.get().asFile.absolutePath, "-P", "21")
-    abis.forEach { cargoArgs += listOf("-t", it) }
-    cargoArgs += listOf("build", "--release", "--features", "ffi")
-    commandLine("cargo")
-    setArgs(cargoArgs)
-    outputs.dir(jniLibsDir)
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
 }
 
-// Generate the UniFFI Kotlin bindings from the compiled library's metadata.
-val uniffiBindgen = tasks.register<Exec>("uniffiBindgen") {
-    dependsOn(cargoNdkBuild)
-    workingDir = coreDir
-    val lib = jniLibsDir.get().file("arm64-v8a/$libName").asFile
-    val outDir = layout.buildDirectory.dir("generated/uniffi").get().asFile
-    outputs.dir(outDir)
-    commandLine(
-        "cargo", "run", "--quiet", "--features", "uniffi-cli", "--bin", "uniffi-bindgen", "--",
-        "generate",
-        "--library", lib.absolutePath,
-        "--language", "kotlin",
-        "--out-dir", outDir.absolutePath,
-        "--no-format",
-    )
+// The plugin cross-compiles the root crate into build/rustJniLibs/android/<abi>/
+// and adds them to jniLibs. (libname "maplibre_contour_rs" ->
+// libmaplibre_contour_rs.so per ABI.)
+cargo {
+    module = "../.."
+    libname = "maplibre_contour_rs"
+    targets = listOf("arm64", "arm", "x86_64")
+    profile = "release"
+    apiLevel = 21
+    pythonCommand = "python3"
 }
 
-tasks.named("preBuild").configure { dependsOn(cargoNdkBuild) }
-tasks.withType<KotlinCompile>().configureEach { dependsOn(uniffiBindgen) }
-// The sources jar (withSourcesJar) also reads the generated/uniffi dir.
-tasks.matching { it.name.startsWith("source") && it.name.endsWith("Jar") }
-    .configureEach { dependsOn(uniffiBindgen) }
+// Generates the UniFFI Kotlin bindings from the compiled library's metadata.
+abstract class UniffiBindgen @Inject constructor(private val execOps: ExecOperations) : DefaultTask() {
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+    @get:InputDirectory @get:PathSensitive(PathSensitivity.RELATIVE) abstract val rustJniLibs: DirectoryProperty
+    @get:Internal abstract val coreDir: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val out = outputDir.get().asFile.apply { mkdirs() }
+        val lib = rustJniLibs.get().dir("arm64-v8a").file("libmaplibre_contour_rs.so").asFile
+        execOps.exec {
+            workingDir = coreDir.get().asFile
+            commandLine = listOf(
+                "cargo", "run", "--quiet", "--bin", "uniffi-bindgen", "--",
+                "generate", "--library", lib.absolutePath,
+                "--language", "kotlin", "--out-dir", out.absolutePath, "--no-format",
+            )
+        }
+    }
+}
+
+val rustJniLibsDir = layout.buildDirectory.dir("rustJniLibs/android")
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        val bindgen = tasks.register<UniffiBindgen>("uniffiBindgen") {
+            dependsOn("cargoBuild")
+            coreDir.set(layout.projectDirectory.dir("../.."))
+            rustJniLibs.set(rustJniLibsDir)
+        }
+        variant.sources.java?.addGeneratedSourceDirectory(bindgen, UniffiBindgen::outputDir)
+    }
+}
+
+// Make the JNI merge step wait for the cargo build (per the plugin's README).
+tasks.matching { it.name.matches(Regex("merge.*JniLibFolders")) }.configureEach {
+    inputs.dir(rustJniLibsDir)
+    dependsOn("cargoBuild")
+}
 
 dependencies {
-    implementation("net.java.dev.jna:jna:5.19.0@aar")
+    implementation("net.java.dev.jna:jna:5.19.1@aar")
 }
 
 // The JNA dependency must resolve as the Android `aar` (it ships

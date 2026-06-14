@@ -1,10 +1,13 @@
 name: Release (bump version)
 
-# Manually-triggered release. Bumps the version, builds the iOS XCFramework,
-# pins it into Package.swift (url + checksum) on the tagged commit, pushes the
-# tag, and attaches the XCFramework to the GitHub Release. JitPack builds the
-# Android AAR from the same tag. `main` keeps the path-based Package.swift for
-# local dev; only the tag carries the url+checksum and the bumped Cargo.toml.
+# Manually-triggered release. The iOS and Android packages build in parallel as
+# side-effect-free jobs that only upload workflow artifacts. The single `publish`
+# job runs *after both succeed*, then does everything irreversible at once: bump
+# Cargo.toml, pin Package.swift (url + checksum), commit, push the tag, create the
+# GitHub Release, upload all assets, and ping JitPack to repackage the AAR. So a
+# failure in either build never leaves a published tag or a half-populated
+# release. `main` keeps the path-based Package.swift for local dev; only the tag
+# carries the url+checksum and the bumped Cargo.toml.
 on:
   workflow_dispatch:
     inputs:
@@ -22,23 +25,26 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: macos-latest
+  version:
+    name: Compute next version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+      prev: ${{ steps.next.outputs.prev }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # need full tag history to find the latest version
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-edit
-
-      - name: Compute next version
-        id: next
+      - id: next
         run: |
           set -euo pipefail
           latest="$(git tag -l 'v*.*.*' --sort=-v:refname | head -n1)"
-          if [ -z "$latest" ]; then latest="v0.0.0"; fi
+          # `prev` (empty on the first release) is pinned as the changelog base:
+          # release commits are tag-only and never merged into main, so they aren't
+          # ancestors of each other and GitHub's auto-detection picks the wrong base.
+          prev="$latest"
+          if [ -z "$latest" ]; then latest="v0.0.0"; prev=""; fi
+          echo "prev=$prev" >> "$GITHUB_OUTPUT"
           ver="${latest#v}"
           IFS='.' read -r major minor patch <<< "$ver"
           case "${{ inputs.bump }}" in
@@ -46,29 +52,100 @@ jobs:
             minor) minor=$((minor + 1)); patch=0 ;;
             patch) patch=$((patch + 1)) ;;
           esac
-          version="${major}.${minor}.${patch}"
-          next="v${version}"
+          next="v${major}.${minor}.${patch}"
           echo "Next tag: $next"
           if git rev-parse -q --verify "refs/tags/$next" >/dev/null; then
             echo "::error::Tag $next already exists"; exit 1
           fi
           echo "tag=$next" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Sync Cargo.toml version (keeps Rust git-dep consumers aligned)
-        run: cargo set-version "${{ steps.next.outputs.version }}"
-
+  ios:
+    name: Build iOS XCFramework
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
       - name: Build XCFramework + Swift bindings
         run: ./scripts/build-xcframework.sh
-
-      - name: Package, checksum, and pin Package.swift
-        env:
-          TAG: ${{ steps.next.outputs.tag }}
+      - name: Zip + checksum, stage for publish
         run: |
           set -euo pipefail
+          mkdir -p dist/ios
           ( cd artifacts && zip -qry MaplibreContourFFI.xcframework.zip MaplibreContourFFI.xcframework )
-          checksum="$(swift package compute-checksum artifacts/MaplibreContourFFI.xcframework.zip)"
+          cp artifacts/MaplibreContourFFI.xcframework.zip dist/ios/
+          swift package compute-checksum artifacts/MaplibreContourFFI.xcframework.zip > dist/ios/checksum.txt
+          # The release commit re-pins this generated file; carry it to `publish`.
+          cp Sources/MaplibreContour/maplibre_contour_rs.swift dist/ios/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ios-dist
+          path: dist/ios
+
+  android:
+    name: Build Android AAR
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Install NDK
+        run: sdkmanager --install "ndk;28.2.13676358"
+      - name: Build + publish the AAR to the local Maven repo
+        working-directory: android
+        run: VERSION="$TAG" ./gradlew :contour:publishToMavenLocal --no-daemon --stacktrace
+      - name: Stage AAR (aar + pom + sources) for publish
+        run: |
+          set -euo pipefail
+          VER="${TAG#v}" # the publication strips the leading v
+          M2="$HOME/.m2/repository/com/mapeak/contour/$VER"
+          mkdir -p dist/android
+          cp "$M2/contour-$VER.aar" "$M2/contour-$VER.pom" "$M2/contour-$VER-sources.jar" dist/android/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-dist
+          path: dist/android
+
+  publish:
+    name: Publish release
+    needs: [version, ios, android]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+      PREV: ${{ needs.version.outputs.prev }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-edit
+      - uses: actions/download-artifact@v7
+        with:
+          name: ios-dist
+          path: dist/ios
+      - uses: actions/download-artifact@v7
+        with:
+          name: android-dist
+          path: dist/android
+
+      - name: Bump Cargo.toml + pin Package.swift, carry generated Swift
+        run: |
+          set -euo pipefail
+          cargo set-version "${TAG#v}" # keeps Rust git-dep consumers aligned
+          checksum="$(cat dist/ios/checksum.txt)"
           url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/MaplibreContourFFI.xcframework.zip"
+          cp dist/ios/maplibre_contour_rs.swift Sources/MaplibreContour/maplibre_contour_rs.swift
           python3 - "$url" "$checksum" <<'PY'
           import sys
           url, checksum = sys.argv[1], sys.argv[2]
@@ -81,8 +158,6 @@ jobs:
           PY
 
       - name: Commit, tag, and push the tag
-        env:
-          TAG: ${{ steps.next.outputs.tag }}
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
@@ -92,18 +167,22 @@ jobs:
           git tag -a "$TAG" -m "$TAG"
           git push origin "$TAG" # tag only; main stays path-based
 
-      - name: Create GitHub Release + upload XCFramework
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.next.outputs.tag }}
+      - name: Create GitHub Release + upload all assets
         run: |
-          gh release create "$TAG" --title "$TAG" --generate-notes
-          gh release upload "$TAG" artifacts/MaplibreContourFFI.xcframework.zip
+          set -euo pipefail
+          VER="${TAG#v}"
+          # Pin the changelog base to the true previous tag (see the version job).
+          args=(--title "$TAG" --generate-notes)
+          [ -n "$PREV" ] && args+=(--notes-start-tag "$PREV")
+          gh release create "$TAG" "${args[@]}"
+          gh release upload "$TAG" \
+            dist/ios/MaplibreContourFFI.xcframework.zip \
+            "dist/android/contour-$VER.aar" \
+            "dist/android/contour-$VER.pom" \
+            "dist/android/contour-$VER-sources.jar"
 
-      - name: Warm up JitPack build (best effort)
-        env:
-          TAG: ${{ steps.next.outputs.tag }}
+      - name: Warm up JitPack repackage (best effort)
         run: |
           curl -s -m 300 -o /dev/null \
             "https://jitpack.io/com/github/${GITHUB_REPOSITORY}/${TAG}/build.log" || true
-          echo "Requested JitPack build for $TAG (see https://jitpack.io/#${GITHUB_REPOSITORY})"
+          echo "Requested JitPack repackage for $TAG (see https://jitpack.io/#${GITHUB_REPOSITORY})"
