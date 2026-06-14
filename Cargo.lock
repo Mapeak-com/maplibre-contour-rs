@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "maplibre-contour-rs"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "geo-types",
  "geozero",
