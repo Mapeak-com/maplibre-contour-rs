@@ -35,7 +35,7 @@ thiserror = "2"
 lru = "0.18"
 # Kotlin/Swift bindings + the `uniffi-bindgen` CLI. Always on: this crate is
 # built primarily to be embedded on mobile (mirrors Mapeak-com/pmtiles-mobile).
-uniffi = { version = "0.31", features = ["cli"] }
+uniffi = { version = "0.32", features = ["cli"] }
 
 # Generates the Kotlin/Swift sources from the compiled library.
 [[bin]]
