@@ -127,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.2
         with:
           tool: cargo-edit
       - uses: actions/download-artifact@v8
