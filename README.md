@@ -146,7 +146,7 @@ design notes and follow-up ideas.
 
 ```bash
 cargo build && cargo test                 # Rust core
-./scripts/build-xcframework.sh            # iOS/macOS xcframework + Swift wrapper
+./scripts/build-xcframework.sh            # iOS xcframework + Swift wrapper
 ( cd android && ./gradlew :contour:assembleRelease )   # Android AAR
 ```
 
