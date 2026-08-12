@@ -33,13 +33,24 @@ geozero = { version = "0.15", default-features = false, features = [
 thiserror = "2"
 # LRU cache for decoded parent DEM tiles (mirrors maplibre-contour's cache).
 lru = "0.18"
-# Kotlin/Swift bindings + the `uniffi-bindgen` CLI. Always on: this crate is
-# built primarily to be embedded on mobile (mirrors Mapeak-com/pmtiles-mobile).
-uniffi = { version = "0.31", features = ["cli"] }
+# Kotlin/Swift bindings. Always on: this crate is built primarily to be embedded
+# on mobile (mirrors Mapeak-com/pmtiles-mobile). Note the *runtime* only — the
+# `cli` feature (uniffi_bindgen + uniffi_udl + weedle/winnow/clap/toml) is gated
+# behind our own `cli` feature below so the code generator never ends up linked
+# into the shipped `.a`/`.so`.
+uniffi = { version = "0.31" }
 
-# Generates the Kotlin/Swift sources from the compiled library.
+[features]
+# Pulls in the `uniffi_bindgen` code generator. Only ever enabled for the
+# `uniffi-bindgen` host binary — never when building the mobile library.
+cli = ["uniffi/cli"]
+
+# Generates the Kotlin/Swift sources from the compiled library. Build/run it with
+# `cargo run --features cli --bin uniffi-bindgen`; `required-features` makes a
+# plain `cargo build` skip it (and with it, all of uniffi's bindgen deps).
 [[bin]]
 name = "uniffi-bindgen"
+required-features = ["cli"]
 
 [dev-dependencies]
 # Add criterion here when you start benchmarking the hot path.
@@ -50,4 +61,12 @@ name = "uniffi-bindgen"
 [profile.release]
 # Mobile binaries care about size; tune as needed.
 opt-level = 3
-lto = "thin"
+# LTO is deliberately OFF. `lto = "thin"` forces rustc to embed LLVM bitcode in
+# every object (`__LLVM,__bitcode` on Mach-O), which dominated the published
+# xcframework — 53 MB of the 71 MB ios-arm64 slice was bitcode. Apple dropped
+# bitcode in Xcode 14 and `bitcode_strip` is a no-op in current Xcode, so it has
+# to be prevented at codegen time: with LTO off, cargo passes
+# `-C embed-bitcode=no` automatically. `codegen-units = 1` recovers most of the
+# cross-crate optimization LTO would have given.
+lto = false
+codegen-units = 1

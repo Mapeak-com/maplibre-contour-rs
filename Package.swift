@@ -10,7 +10,7 @@ import PackageDescription
 // pinned to a version tag.
 let package = Package(
     name: "MaplibreContour",
-    platforms: [.iOS(.v13), .macOS(.v11)],
+    platforms: [.iOS(.v13)],
     products: [
         .library(name: "MaplibreContour", targets: ["MaplibreContour"]),
     ],

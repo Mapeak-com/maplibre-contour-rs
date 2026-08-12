@@ -26,7 +26,8 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        # --all-features so the `cli`-gated uniffi-bindgen bin is linted too.
+        run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test
       - name: Docs
@@ -68,5 +69,15 @@ jobs:
         run: ./scripts/build-xcframework.sh
       - name: Check committed Swift bindings are up to date
         run: git diff --exit-code -- Sources/MaplibreContour/maplibre_contour_rs.swift
-      - name: Build SwiftPM package
-        run: swift build
+      # Not `swift build`: that builds for the host (macOS), and the xcframework
+      # no longer carries a macOS slice. Build for iOS instead, which is the only
+      # platform the package declares.
+      - name: Build SwiftPM package (iOS)
+        run: |
+          xcodebuild build \
+            -scheme MaplibreContour \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dd \
+            -skipPackagePluginValidation
+      - name: Report xcframework slice sizes
+        run: du -sh artifacts/MaplibreContourFFI.xcframework/*/ | sort -h

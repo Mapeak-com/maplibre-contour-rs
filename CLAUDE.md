@@ -80,14 +80,24 @@ usage examples live in that module's rustdoc. Key points:
   returns the MVT `Vec<u8>`. `ContourConfig`/`ThresholdRule`/`Encoding` cross as
   records/enums; `parse_threshold_spec` mirrors the `dem-contour://` query.
 - The `uniffi-bindgen` binary generates the Kotlin/Swift sources from the
-  compiled library (`uniffi` is a non-optional dep with the `cli` feature).
+  compiled library. `uniffi` is a non-optional dep, but its `cli` feature (the
+  code generator: `uniffi_bindgen`, `uniffi_udl`, `weedle`, `winnow`, `clap`)
+  sits behind our own `cli` feature, and the bin is `required-features = ["cli"]`.
+  **Always invoke it as `cargo run --features cli --bin uniffi-bindgen`**, and
+  never enable `cli` when building the library — otherwise ~7 MB of code
+  generator gets linked into the shipped `.a`/`.so`, which is what it used to do.
 - Packaging mirrors the proven `Mapeak-com/pmtiles-mobile` setup (`ci.yml`
   builds the Rust core, the Android AAR, and the iOS xcframework on every push):
-  - **iOS / SwiftPM** — `scripts/build-xcframework.sh` builds the `.a` per Apple
-    target (iOS + macOS, so CI `swift build` links), generates the committed
+  - **iOS / SwiftPM** — `scripts/build-xcframework.sh` builds the `.a` for
+    `aarch64-apple-ios` + `aarch64-apple-ios-sim`, generates the committed
     `Sources/MaplibreContour/maplibre_contour_rs.swift`, and assembles
     `artifacts/MaplibreContourFFI.xcframework`. `Package.swift` is path-based on
     `main`; the release job pins it to the release `url`/`checksum` on the tag.
+    **Apple-silicon iOS only, on purpose** — the macOS and Intel-simulator
+    slices were dropped (nothing consumed them and each roughly doubled the
+    download). Consequences: `Package.swift` declares `platforms: [.iOS(.v13)]`,
+    and CI can't use `swift build` (it targets the host), so it builds with
+    `xcodebuild -destination 'generic/platform=iOS'` instead.
     The xcframework's headers are nested under `Headers/maplibre_contour_rsFFI/`
     (modulemap + `.h`), **not** the `Headers/` root — Clang finds the module via
     `<Headers>/<module>/module.modulemap`, and the unique path avoids the
@@ -114,6 +124,12 @@ usage examples live in that module's rustdoc. Key points:
   geometry/coordinate transforms.
 - Keep stages independently testable; the pipeline should stay thin.
 - Don't add heavy dependencies without a reason — this ships on phones.
+- **Don't turn LTO back on** in `[profile.release]`. `lto = "thin"` makes rustc
+  embed LLVM bitcode in every object (`__LLVM,__bitcode`), which was 53 MB of the
+  71 MB ios-arm64 slice. Apple removed bitcode in Xcode 14 and `bitcode_strip` is
+  a no-op in current Xcode, so it has to be avoided at codegen time: with LTO off
+  cargo passes `-C embed-bitcode=no` for us. `codegen-units = 1` is the
+  replacement for the cross-crate optimization LTO gave.
 
 ## Reference
 
