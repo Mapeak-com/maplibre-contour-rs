@@ -69,9 +69,6 @@ jobs:
         run: ./scripts/build-xcframework.sh
       - name: Check committed Swift bindings are up to date
         run: git diff --exit-code -- Sources/MaplibreContour/maplibre_contour_rs.swift
-      # Not `swift build`: that builds for the host (macOS), and the xcframework
-      # no longer carries a macOS slice. Build for iOS instead, which is the only
-      # platform the package declares.
       - name: Build SwiftPM package (iOS)
         run: |
           xcodebuild build \
