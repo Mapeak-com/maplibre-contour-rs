@@ -1,3 +1,3 @@
 plugins {
-    id("com.android.library") version "9.3.0" apply false
+    id("com.android.library") version "9.3.1" apply false
 }
