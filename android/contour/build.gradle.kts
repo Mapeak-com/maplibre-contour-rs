@@ -25,6 +25,9 @@ android {
 
     defaultConfig {
         minSdk = 21
+        // Shipped in the AAR as proguard.txt; UniFFI/JNA resolve by name, so
+        // consumers must not let R8 rename or strip the bindings.
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     compileOptions {

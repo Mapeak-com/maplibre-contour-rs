@@ -111,6 +111,10 @@ usage examples live in that module's rustdoc. Key points:
     those and `mvn install`s them (no compile in JitPack). `.cargo/config.toml`
     forces 16 KB ELF alignment (Android 15+); the JNA `@aar` + disabled module
     metadata avoid `UnsatisfiedLinkError`. `uniffi.toml` sets the Kotlin package.
+    `contour/consumer-rules.pro` ships in the AAR as `proguard.txt` (via
+    `consumerProguardFiles`) so a minifying app doesn't break the bindings —
+    JNA resolves native methods, struct fields and callbacks by *name*, so
+    `com.mapeak.maplibrecontour.**` and `com.sun.jna.**` must survive R8.
   - **Release** — `release.yml` is a manual `workflow_dispatch` (patch/minor/
     major); it computes the next version from git tags, `cargo set-version`s
     `Cargo.toml`, builds, pins `Package.swift`, and pushes the tag only.
