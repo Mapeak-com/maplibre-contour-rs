@@ -17,7 +17,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "MaplibreContourFFI",
-            path: "artifacts/MaplibreContourFFI.xcframework"
+            url: "https://github.com/Mapeak-com/maplibre-contour-rs/releases/download/v0.4.3/MaplibreContourFFI.xcframework.zip",
+            checksum: "dece33bbe7efe41a9dfc084f6fb102515498add242903e6faa67aca36d2f5a86"
         ),
         .target(
             name: "MaplibreContour",
