@@ -12,7 +12,7 @@ import javax.inject.Inject
 
 plugins {
     id("com.android.library")
-    id("net.mullvad.rust-android") version "0.10.1"
+    id("net.mullvad.rust-android") version "0.11.0"
     id("maven-publish")
 }
 
