@@ -12,7 +12,7 @@ import javax.inject.Inject
 
 plugins {
     id("com.android.library")
-    id("net.mullvad.rust-android") version "0.10.1"
+    id("net.mullvad.rust-android") version "0.11.0"
     id("maven-publish")
 }
 
@@ -53,7 +53,6 @@ cargo {
     targets = listOf("arm64", "arm", "x86_64")
     profile = "release"
     apiLevel = 21
-    pythonCommand = "python3"
 }
 
 // Generates the UniFFI Kotlin bindings from the compiled library's metadata.
