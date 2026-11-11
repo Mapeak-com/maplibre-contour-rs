@@ -38,7 +38,7 @@ lru = "0.18"
 # `cli` feature (uniffi_bindgen + uniffi_udl + weedle/winnow/clap/toml) is gated
 # behind our own `cli` feature below so the code generator never ends up linked
 # into the shipped `.a`/`.so`.
-uniffi = { version = "0.31" }
+uniffi = { version = "0.32" }
 
 [features]
 # Pulls in the `uniffi_bindgen` code generator. Only ever enabled for the

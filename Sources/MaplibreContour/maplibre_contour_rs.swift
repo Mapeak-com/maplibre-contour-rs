@@ -39,6 +39,52 @@ fileprivate extension ForeignBytes {
     init(bufferPointer: UnsafeBufferPointer<UInt8>) {
         self.init(len: Int32(bufferPointer.count), data: bufferPointer.baseAddress)
     }
+
+    init(rawBufferPointer: UnsafeRawBufferPointer) {
+        self.init(
+            len: Int32(rawBufferPointer.count),
+            data: rawBufferPointer.baseAddress?.assumingMemoryBound(to: UInt8.self)
+        )
+    }
+}
+
+// Converter for `&[u8]` / `[ByRef] bytes` arguments.
+//
+// Conforms to `FfiConverter` so the compiler enforces the full converter
+// method set. Only the scope-bound `lower(_:_body:)` overload is sound —
+// zero-copy byte buffers only flow foreign -> Rust, and only in argument
+// position. The four protocol-witness methods (`lift`, `lower`, `read`,
+// `write`) `fatalError` at runtime if anyone reaches them.
+//
+// The scope-bound `lower` takes a closure because the `ForeignBytes`
+// pointer is only guaranteed valid for the duration of
+// `Data.withUnsafeBytes`. Callers must run the full FFI call inside
+// the closure body.
+fileprivate enum FfiConverterByRefBytes: FfiConverter {
+    typealias SwiftType = Data
+    typealias FfiType = ForeignBytes
+
+    static func lower<R>(_ value: Data, _ body: (ForeignBytes) throws -> R) rethrows -> R {
+        return try value.withUnsafeBytes { rawBuf in
+            try body(ForeignBytes(rawBufferPointer: rawBuf))
+        }
+    }
+
+    static func lower(_ value: Data) -> ForeignBytes {
+        fatalError("ByRef bytes cannot use the plain lower: returning ForeignBytes escapes the Data.withUnsafeBytes scope. Use the scope-bound lower(_:_body:) overload instead.")
+    }
+
+    static func lift(_ value: ForeignBytes) throws -> Data {
+        fatalError("ByRef bytes cannot be lifted: zero-copy &[u8] only flows foreign->Rust")
+    }
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
+        fatalError("ByRef bytes cannot be read from a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+    }
+
+    static func write(_ value: Data, into buf: inout [UInt8]) {
+        fatalError("ByRef bytes cannot be written to a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+    }
 }
 
 // For every type used in the interface, we provide helper methods for conveniently
@@ -485,7 +531,11 @@ fileprivate struct FfiConverterString: FfiConverter {
             return String()
         }
         let bytes = UnsafeBufferPointer<UInt8>(start: value.data!, count: Int(value.len))
-        return String(bytes: bytes, encoding: String.Encoding.utf8)!
+        // Use Swift's native UTF-8 decoder; `String(bytes:encoding:.utf8)` goes
+        // through Foundation's NSString and silently strips a leading U+FEFF BOM.
+        // Invalid UTF-8 substitutes U+FFFD instead of trapping (unreachable
+        // given Rust's `String` invariant).
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     public static func lower(_ value: String) -> RustBuffer {
@@ -501,7 +551,8 @@ fileprivate struct FfiConverterString: FfiConverter {
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
         let len: Int32 = try readInt(&buf)
-        return String(bytes: try readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
+        // See `lift` above for why we avoid Foundation's NSString-backed decoder here.
+        return String(decoding: try readBytes(&buf, count: Int(len)), as: UTF8.self)
     }
 
     public static func write(_ value: String, into buf: inout [UInt8]) {
@@ -592,9 +643,10 @@ open class DemManager: DemManagerProtocol, @unchecked Sendable {
 public convenience init(fetcher: DemTileFetcher, config: ContourConfig) {
     let handle =
         try! rustCall() {
+        uniffiCallStatus in
     uniffi_maplibre_contour_rs_fn_constructor_demmanager_new(
         FfiConverterTypeDemTileFetcher_lower(fetcher),
-        FfiConverterTypeContourConfig_lower(config),$0
+        FfiConverterTypeContourConfig_lower(config),uniffiCallStatus
     )
 }
     self.init(unsafeFromHandle: handle)
@@ -617,11 +669,12 @@ public convenience init(fetcher: DemTileFetcher, config: ContourConfig) {
      */
 open func tile(z: UInt8, x: UInt32, y: UInt32)throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+        uniffiCallStatus in
     uniffi_maplibre_contour_rs_fn_method_demmanager_tile(
             self.uniffiCloneHandle(),
         FfiConverterUInt8.lower(z),
         FfiConverterUInt32.lower(x),
-        FfiConverterUInt32.lower(y),$0
+        FfiConverterUInt32.lower(y),uniffiCallStatus
     )
 })
 }
@@ -750,9 +803,10 @@ open class DemTileFetcherImpl: DemTileFetcher, @unchecked Sendable {
     
 open func fetch(url: String)throws  -> Data?  {
     return try  FfiConverterOptionData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+        uniffiCallStatus in
     uniffi_maplibre_contour_rs_fn_method_demtilefetcher_fetch(
             self.uniffiCloneHandle(),
-        FfiConverterString.lower(url),$0
+        FfiConverterString.lower(url),uniffiCallStatus
     )
 })
 }
@@ -814,7 +868,11 @@ fileprivate struct UniffiCallbackInterfaceDemTileFetcher {
 
     // Rust stores this pointer for future callback invocations, so it must live
     // for the process lifetime (not just for the init function call).
-    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceDemTileFetcher> = {
+    //
+    // `nonisolated(unsafe)` is needed under Swift 6 strict concurrency.
+    // This is safe because the pointee is initialized once during static init
+    // and never mutated by either side of the FFI.  Its fields are C function pointers.
+    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceDemTileFetcher> = {
         let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceDemTileFetcher>.allocate(capacity: 1)
         ptr.initialize(to: vtable)
         return UnsafePointer(ptr)
@@ -1142,8 +1200,7 @@ public func FfiConverterTypeThresholdRule_lower(_ value: ThresholdRule) -> RustB
     return FfiConverterTypeThresholdRule.lower(value)
 }
 
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 /**
  * How elevation (meters) is packed into the RGB channels of a DEM tile.
  */
@@ -1222,7 +1279,8 @@ public func FfiConverterTypeEncoding_lower(_ value: Encoding) -> RustBuffer {
 /**
  * Error surfaced across the FFI boundary (flattened to its message).
  */
-public enum FfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+public 
+enum FfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
     
     
@@ -1373,7 +1431,8 @@ fileprivate struct FfiConverterSequenceTypeThresholdRule: FfiConverterRustBuffer
  */
 public func defaultConfig() -> ContourConfig  {
     return try!  FfiConverterTypeContourConfig_lift(try! rustCall() {
-    uniffi_maplibre_contour_rs_fn_func_default_config($0
+        uniffiCallStatus in
+    uniffi_maplibre_contour_rs_fn_func_default_config(uniffiCallStatus
     )
 })
 }
@@ -1383,8 +1442,9 @@ public func defaultConfig() -> ContourConfig  {
  */
 public func parseThresholdSpec(spec: String) -> [ThresholdRule]  {
     return try!  FfiConverterSequenceTypeThresholdRule.lift(try! rustCall() {
+        uniffiCallStatus in
     uniffi_maplibre_contour_rs_fn_func_parse_threshold_spec(
-        FfiConverterString.lower(spec),$0
+        FfiConverterString.lower(spec),uniffiCallStatus
     )
 })
 }
@@ -1404,19 +1464,19 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_func_default_config() != 58162) {
+    if (uniffi_maplibre_contour_rs_checksum_func_default_config() != 48780) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_func_parse_threshold_spec() != 26605) {
+    if (uniffi_maplibre_contour_rs_checksum_func_parse_threshold_spec() != 11250) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_method_demmanager_tile() != 46886) {
+    if (uniffi_maplibre_contour_rs_checksum_method_demmanager_tile() != 51102) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_method_demtilefetcher_fetch() != 9923) {
+    if (uniffi_maplibre_contour_rs_checksum_method_demtilefetcher_fetch() != 1920) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_maplibre_contour_rs_checksum_constructor_demmanager_new() != 10497) {
+    if (uniffi_maplibre_contour_rs_checksum_constructor_demmanager_new() != 40836) {
         return InitializationResult.apiChecksumMismatch
     }
 
