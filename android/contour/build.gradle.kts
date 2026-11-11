@@ -25,6 +25,7 @@ android {
 
     defaultConfig {
         minSdk = 21
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     compileOptions {
@@ -68,7 +69,7 @@ abstract class UniffiBindgen @Inject constructor(private val execOps: ExecOperat
         execOps.exec {
             workingDir = coreDir.get().asFile
             commandLine = listOf(
-                "cargo", "run", "--quiet", "--bin", "uniffi-bindgen", "--",
+                "cargo", "run", "--quiet", "--features", "cli", "--bin", "uniffi-bindgen", "--",
                 "generate", "--library", lib.absolutePath,
                 "--language", "kotlin", "--out-dir", out.absolutePath, "--no-format",
             )
