@@ -44,9 +44,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
       - name: Install NDK
@@ -65,6 +67,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Build XCFramework + generate Swift bindings
         run: ./scripts/build-xcframework.sh
       - name: Check committed Swift bindings are up to date
