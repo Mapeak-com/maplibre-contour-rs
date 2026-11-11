@@ -96,6 +96,9 @@ pub struct ContourConfig {
     /// Highest zoom at which DEM tiles exist. Requests above it are served by
     /// overzooming an ancestor tile.
     pub dem_max_zoom: u8,
+    /// Lowest zoom at which DEM tiles exist. A DEM tile the source has no data
+    /// for is replaced by the closest lower zoom that has it, down to this one.
+    pub dem_min_zoom: u8,
     /// Extra levels to coarsen the DEM by before sampling: the source tile zoom
     /// is `min(z - overzoom, dem_max_zoom)`. 0 = use the exact zoom when present.
     pub overzoom: u8,
@@ -137,6 +140,7 @@ impl Default for ContourConfig {
             buffer_px: 1,
             dem_url_pattern: String::new(),
             dem_max_zoom: 12,
+            dem_min_zoom: 0,
             overzoom: 0,
             thresholds: vec![ThresholdRule {
                 zoom: 0,

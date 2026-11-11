@@ -679,7 +679,9 @@ public func FfiConverterTypeDemManager_lower(_ value: DemManager) -> UInt64 {
 /**
  * Returns the DEM PNG bytes for a tile URL. Implemented on the host side
  * (e.g. an OkHttp call that your interceptor can catch); return `None` for a
- * tile with no data.
+ * tile the DEM does not have (a 404), and the contours under it are traced
+ * from the closest lower zoom that has it. Return an error for a tile that
+ * could not be fetched, so a network failure is not taken for missing data.
  */
 public protocol DemTileFetcher: AnyObject, Sendable {
     
@@ -689,7 +691,9 @@ public protocol DemTileFetcher: AnyObject, Sendable {
 /**
  * Returns the DEM PNG bytes for a tile URL. Implemented on the host side
  * (e.g. an OkHttp call that your interceptor can catch); return `None` for a
- * tile with no data.
+ * tile the DEM does not have (a 404), and the contours under it are traced
+ * from the closest lower zoom that has it. Return an error for a tile that
+ * could not be fetched, so a network failure is not taken for missing data.
  */
 open class DemTileFetcherImpl: DemTileFetcher, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -908,6 +912,11 @@ public struct ContourConfig: Equatable, Hashable {
      */
     public var demMaxZoom: UInt8
     /**
+     * Lowest zoom at which DEM tiles exist. A DEM tile the source has no data
+     * for is replaced by the closest lower zoom that has it, down to this one.
+     */
+    public var demMinZoom: UInt8
+    /**
      * Extra levels to coarsen the DEM by before sampling: the source tile zoom
      * is `min(z - overzoom, dem_max_zoom)`. 0 = use the exact zoom when present.
      */
@@ -958,6 +967,10 @@ public struct ContourConfig: Equatable, Hashable {
          * overzooming an ancestor tile.
          */demMaxZoom: UInt8, 
         /**
+         * Lowest zoom at which DEM tiles exist. A DEM tile the source has no data
+         * for is replaced by the closest lower zoom that has it, down to this one.
+         */demMinZoom: UInt8, 
+        /**
          * Extra levels to coarsen the DEM by before sampling: the source tile zoom
          * is `min(z - overzoom, dem_max_zoom)`. 0 = use the exact zoom when present.
          */overzoom: UInt8, 
@@ -983,6 +996,7 @@ public struct ContourConfig: Equatable, Hashable {
         self.bufferPx = bufferPx
         self.demUrlPattern = demUrlPattern
         self.demMaxZoom = demMaxZoom
+        self.demMinZoom = demMinZoom
         self.overzoom = overzoom
         self.thresholds = thresholds
         self.multiplier = multiplier
@@ -1012,6 +1026,7 @@ public struct FfiConverterTypeContourConfig: FfiConverterRustBuffer {
                 bufferPx: FfiConverterUInt32.read(from: &buf), 
                 demUrlPattern: FfiConverterString.read(from: &buf), 
                 demMaxZoom: FfiConverterUInt8.read(from: &buf), 
+                demMinZoom: FfiConverterUInt8.read(from: &buf), 
                 overzoom: FfiConverterUInt8.read(from: &buf), 
                 thresholds: FfiConverterSequenceTypeThresholdRule.read(from: &buf), 
                 multiplier: FfiConverterFloat.read(from: &buf), 
@@ -1027,6 +1042,7 @@ public struct FfiConverterTypeContourConfig: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.bufferPx, into: &buf)
         FfiConverterString.write(value.demUrlPattern, into: &buf)
         FfiConverterUInt8.write(value.demMaxZoom, into: &buf)
+        FfiConverterUInt8.write(value.demMinZoom, into: &buf)
         FfiConverterUInt8.write(value.overzoom, into: &buf)
         FfiConverterSequenceTypeThresholdRule.write(value.thresholds, into: &buf)
         FfiConverterFloat.write(value.multiplier, into: &buf)

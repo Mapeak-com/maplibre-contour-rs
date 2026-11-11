@@ -11,7 +11,9 @@ use crate::tile::TileCoord;
 /// Fetches the raw (PNG) bytes for one DEM tile.
 pub trait TileSource: Send + Sync {
     /// Return the bytes for `coord`, or `Ok(None)` for a tile that legitimately
-    /// has no data (ocean / out of range) so the buffer step can clamp.
+    /// has no data (ocean / out of range / above what a sparse DEM holds there),
+    /// so the buffer step can clamp and a missing center falls back to the zoom
+    /// below.
     fn fetch(&self, coord: TileCoord) -> Result<Option<Vec<u8>>>;
 }
 
