@@ -61,7 +61,7 @@ the map. All stages are **implemented and tested**.
   `parse_threshold_spec`. Usage docs live in the module's rustdoc.
 
 Tests: per-module unit tests plus `tests/pipeline.rs` (seam continuity +
-overzoom-from-ancestor).
+overzoom-from-ancestor + falling back to a lower zoom of a sparse DEM).
 
 ## Follow-up ideas (not yet done)
 

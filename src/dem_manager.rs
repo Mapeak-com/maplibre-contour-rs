@@ -51,6 +51,24 @@ impl<S: TileSource> DemManager<S> {
         }
     }
 
+    /// The DEM tile under `coord` and the zoom it was found at: the configured
+    /// `source_zoom`, or the closest lower zoom down to `dem_min_zoom` that has
+    /// the tile when the source has no data for it — a sparse DEM only holds its
+    /// higher zooms where there is data, and the contours there are traced from
+    /// the coarser zoom instead of being left out.
+    fn center_dem_tile(&self, coord: TileCoord) -> Result<Option<(u8, Arc<DemTile>)>> {
+        let mut source_zoom = self.config.source_zoom(coord.z);
+        loop {
+            let dz = coord.z - source_zoom;
+            let center = TileCoord::new(source_zoom, coord.x >> dz, coord.y >> dz);
+            match self.dem_tile(center)? {
+                Some(grid) => return Ok(Some((source_zoom, grid))),
+                None if source_zoom <= self.config.dem_min_zoom => return Ok(None),
+                None => source_zoom -= 1,
+            }
+        }
+    }
+
     /// Generate the contour MVT for `coord`. Returns an empty-layer tile when no
     /// threshold rule applies at this zoom.
     pub fn tile(&self, coord: TileCoord) -> Result<Vec<u8>> {
@@ -58,15 +76,11 @@ impl<S: TileSource> DemManager<S> {
             return encode_mvt(&[], &self.config);
         };
 
-        let source_zoom = self.config.source_zoom(coord.z);
-
-        // Tile pixel size is read from the DEM itself (256, 512, …), like
-        // maplibre-contour — never assumed — so it can't be misconfigured.
-        let dz = coord.z - source_zoom;
-        let center = TileCoord::new(source_zoom, coord.x >> dz, coord.y >> dz);
-        let Some(center_grid) = self.dem_tile(center)? else {
+        let Some((source_zoom, center_grid)) = self.center_dem_tile(coord)? else {
             return encode_mvt(&[], &self.config);
         };
+        // Tile pixel size is read from the DEM itself (256, 512, …), like
+        // maplibre-contour — never assumed — so it can't be misconfigured.
         let source_width = center_grid.width;
 
         let contours = contour_tile(

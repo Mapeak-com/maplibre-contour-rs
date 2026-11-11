@@ -170,6 +170,83 @@ fn overzooms_above_dem_max_zoom() {
     );
 }
 
+/// A sparse DEM only holds its higher zooms where there is data. Where the tile
+/// under the request is missing, the contours are traced from the closest lower
+/// zoom that has it instead of the tile coming out empty.
+#[test]
+fn falls_back_to_a_lower_zoom_where_the_dem_is_sparse() {
+    let height = |gx: f64, gy: f64| (gx + gy) as f32;
+
+    let req = TileCoord::new(12, 8, 8);
+    let available = TileCoord::new(10, req.x >> 2, req.y >> 2);
+
+    // Only z10 exists; the configured source zoom is z12.
+    let mut tiles = HashMap::new();
+    for c in Neighborhood::around(available).coords() {
+        tiles.insert(c, dem_png(c.x, c.y, height));
+    }
+    let source = MockTileSource { tiles };
+
+    let cfg = ContourConfig {
+        extent: 4096,
+        buffer_px: 1,
+        dem_max_zoom: 12,
+        overzoom: 0,
+        thresholds: vec![ThresholdRule {
+            zoom: 0,
+            intervals: vec![5.0, 25.0],
+        }],
+        ..Default::default()
+    };
+    let tiler = DemManager::new(source, cfg);
+
+    let tile = Tile::decode(&tiler.tile(req).unwrap()[..]).unwrap();
+    assert!(
+        !tile.layers[0].features.is_empty(),
+        "a tile missing at the source zoom should be traced from the zoom below"
+    );
+}
+
+/// The fallback stops at the DEM's min zoom, even when a lower zoom has data.
+#[test]
+fn does_not_fall_back_below_dem_min_zoom() {
+    let height = |gx: f64, gy: f64| (gx + gy) as f32;
+
+    let req = TileCoord::new(12, 8, 8);
+    let below_min = TileCoord::new(10, req.x >> 2, req.y >> 2);
+
+    let mut tiles = HashMap::new();
+    for c in Neighborhood::around(below_min).coords() {
+        tiles.insert(c, dem_png(c.x, c.y, height));
+    }
+    let source = MockTileSource { tiles };
+
+    let cfg = ContourConfig {
+        dem_max_zoom: 12,
+        dem_min_zoom: 11,
+        overzoom: 0,
+        ..config()
+    };
+    let tiler = DemManager::new(source, cfg);
+
+    let tile = Tile::decode(&tiler.tile(req).unwrap()[..]).unwrap();
+    assert!(tile.layers.iter().all(|l| l.features.is_empty()));
+}
+
+/// With no DEM at any zoom under the request, the tile is empty, not an error.
+#[test]
+fn empty_when_no_zoom_has_the_dem() {
+    let source = MockTileSource::default();
+    let cfg = ContourConfig {
+        dem_max_zoom: 12,
+        ..config()
+    };
+    let tiler = DemManager::new(source, cfg);
+
+    let tile = Tile::decode(&tiler.tile(TileCoord::new(12, 8, 8)).unwrap()[..]).unwrap();
+    assert!(tile.layers.iter().all(|l| l.features.is_empty()));
+}
+
 enum Edge {
     East,
     West,

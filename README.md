@@ -89,6 +89,7 @@ need:
 | `thresholds` | Per-zoom contour spacing. `parseThresholdSpec("11*200*1000~…")` = `zoom*minor*major`; minor lines are traced, multiples of `major` are tagged `level = 1`. |
 | `multiplier` | Elevation unit scale before contouring (`1.0` = metres, `3.28084` = feet). |
 | `demMaxZoom` / `overzoom` | DEM availability + overzoom; the DEM is sampled at `min(z - overzoom, demMaxZoom)`. |
+| `demMinZoom` | Lowest DEM zoom. When the fetcher returns no data for a tile (a 404), the closest lower zoom that has it is used, down to this one. |
 | `layerName` / `elevationKey` / `levelKey` | MVT layer name and the `ele` / `level` attribute keys. |
 
 ## Use from Rust

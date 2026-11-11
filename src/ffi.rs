@@ -84,7 +84,9 @@ impl From<crate::Error> for FfiError {
 
 /// Returns the DEM PNG bytes for a tile URL. Implemented on the host side
 /// (e.g. an OkHttp call that your interceptor can catch); return `None` for a
-/// tile with no data.
+/// tile the DEM does not have (a 404), and the contours under it are traced
+/// from the closest lower zoom that has it. Return an error for a tile that
+/// could not be fetched, so a network failure is not taken for missing data.
 #[uniffi::export(with_foreign)]
 pub trait DemTileFetcher: Send + Sync {
     fn fetch(&self, url: String) -> Result<Option<Vec<u8>>, FfiError>;
